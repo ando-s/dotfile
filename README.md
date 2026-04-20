@@ -7,6 +7,7 @@
 ```
 dotfile/
 ├── claude/
+│   ├── CLAUDE.md     # ~/.claude/CLAUDE.md に symlink（個人グローバル設定）
 │   ├── skills/       # ~/.claude/skills/ に symlink される
 │   ├── agents/       # ~/.claude/agents/ に symlink される
 │   └── docs/         # ワークフロー説明（人間向け）
@@ -22,6 +23,10 @@ bash install.sh
 Claude Code 起動中の場合は **再起動**（agent / skill list は起動時固定）。
 
 ## 含まれるもの
+
+### 個人グローバル設定
+
+- `claude/CLAUDE.md` — 全プロジェクト共通の個人的好み（コミュニケーションスタイル・開発方針・利用可能ツール）
 
 ### AI-TDD ワークフロー
 

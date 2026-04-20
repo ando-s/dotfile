@@ -47,5 +47,24 @@ for agent in "$DOTFILE_DIR/claude/agents/"*.md; do
   fi
 done
 
+echo "==> Installing CLAUDE.md"
+claude_md_src="$DOTFILE_DIR/claude/CLAUDE.md"
+claude_md_target="$CLAUDE_DIR/CLAUDE.md"
+if [ -f "$claude_md_src" ]; then
+  if [ -L "$claude_md_target" ]; then
+    current=$(readlink "$claude_md_target")
+    if [ "$current" = "$claude_md_src" ]; then
+      echo "  [ok] CLAUDE.md (already linked)"
+    else
+      echo "  [WARN] CLAUDE.md -> $current (different target, leaving alone)"
+    fi
+  elif [ -e "$claude_md_target" ]; then
+    echo "  [WARN] CLAUDE.md exists as non-symlink, leaving alone"
+  else
+    ln -s "$claude_md_src" "$claude_md_target"
+    echo "  [link] CLAUDE.md"
+  fi
+fi
+
 echo ""
-echo "Done. Restart Claude Code to pick up new skills/agents."
+echo "Done. Restart Claude Code to pick up new skills/agents/CLAUDE.md."
