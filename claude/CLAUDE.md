@@ -9,9 +9,9 @@ s-ando が全プロジェクトで Claude Code に守ってほしい個人的な
 - 「ブロッカー」「複雑」「リスクがある」等の抽象ラベルではなく、**具体的に何がどう問題か** を書く
 - 例: ❌「複雑なクエリ」 → ✅「3テーブル JOIN + 集計関数の組み合わせで実行計画が読みづらい」
 
-### 英語の専門用語は日本語訳を併記する
-- DDD パターン名・アーキテクチャ用語など初出時は「英語（日本語訳）」形式
-- 例: 「Bounded Context（境界づけられたコンテキスト）」「Repository（リポジトリ）」
+### ジャーゴンを使わない
+- 業界内でしか通じないスラングや略語は使わない
+- 専門用語が必要な場合は平易な言葉で言い換えるか説明を添える
 
 ### やり取りの文脈をドキュメントに持ち込まない
 - 「○○さんが言った」「以前この方針だった」等の会話文脈はドキュメントに書かない
@@ -49,9 +49,3 @@ s-ando が全プロジェクトで Claude Code に守ってほしい個人的な
 - `git add -A` / `git add .` を使わず、ファイル名指定で stage する
 - destructive な git 操作（`reset --hard`、`push --force` 等）は事前確認
 
-## ツール
-
-### AI-TDD ワークフロー
-TDD で実装したい時は `/tdd-orchestrator <plan.md>` を使う。
-3つの隔離 agent (test-writer / implementer / refactorer) で Red→Green→Refactor を直列実行する。
-詳細: `~/dev/dotfile/claude/docs/TDD-with-ai.md`
