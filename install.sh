@@ -66,5 +66,24 @@ if [ -f "$claude_md_src" ]; then
   fi
 fi
 
+echo "==> Installing .tmux.conf"
+tmux_src="$DOTFILE_DIR/tmux/.tmux.conf"
+tmux_target="$HOME/.tmux.conf"
+if [ -f "$tmux_src" ]; then
+  if [ -L "$tmux_target" ]; then
+    current=$(readlink "$tmux_target")
+    if [ "$current" = "$tmux_src" ]; then
+      echo "  [ok] .tmux.conf (already linked)"
+    else
+      echo "  [WARN] .tmux.conf -> $current (different target, leaving alone)"
+    fi
+  elif [ -e "$tmux_target" ]; then
+    echo "  [WARN] .tmux.conf exists as non-symlink, leaving alone"
+  else
+    ln -s "$tmux_src" "$tmux_target"
+    echo "  [link] .tmux.conf"
+  fi
+fi
+
 echo ""
 echo "Done. Restart Claude Code to pick up new skills/agents/CLAUDE.md."
