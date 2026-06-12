@@ -50,6 +50,11 @@
 - git commit の identity は `user.name=s-ando` / `user.email=s-ando@wwwave.jp` を使う
 - Slack へのメッセージ送信は `~/.slack/send-ouen.sh` を使う（bot トークンは `~/.slack/shigoto-ouen-bot-token`）。Slack MCP は削除済みで、CLI のみ使用する
 
+## dotfile リポジトリ（~/dev/dotfile）の運用
+
+- `~/.claude/CLAUDE.md` と `~/.claude/skills/` 配下は `~/dev/dotfile/claude/` への symlink。編集時は dotfile 側の実体を変更する
+- dotfile へのコミット時は `__pycache__` 等の生成物を含めない。`git add` 前に `.gitignore` 済みかを確認する
+
 ## 許可プロンプトを減らすコマンド選択
 
 許可リストに載りやすい・自動許可済みのコマンドを優先し、不要な許可プロンプトを減らす。
