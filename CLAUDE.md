@@ -1,135 +1,136 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+このファイルは、このリポジトリで作業する Claude Code (claude.ai/code) への
+ガイダンスを提供する。
 
-## What this repository is
+## このリポジトリについて
 
-A personal dotfile repo for Claude Code configuration (skills, agents, personal
-global `CLAUDE.md`) and tmux config. There is no application code, build step,
-or test suite — the repo's only "product" is a set of files that get
-symlinked into `~/.claude/` and `~/.tmux.conf`. Most prose in this repo
-(docs, skill/agent bodies, README) is written in Japanese.
+Claude Code の設定（skill・agent・個人グローバル `CLAUDE.md`）と tmux 設定を
+管理する個人用 dotfile リポジトリ。アプリケーションコード・ビルド・テストは
+存在しない。このリポジトリの「成果物」は、`~/.claude/` と `~/.tmux.conf` に
+symlink されるファイル一式だけである。リポジトリ内の地の文（doc・skill/agent
+本文・README）はほぼ日本語で書かれている。
 
-## Repository layout
+## リポジトリ構成
 
 ```
 dotfile/
 ├── claude/
-│   ├── CLAUDE.md      # symlinked to ~/.claude/CLAUDE.md — personal GLOBAL prefs, applies to every project on this machine
-│   ├── skills/<name>/SKILL.md   # symlinked (whole dir) to ~/.claude/skills/<name>
-│   ├── agents/<name>.md         # symlinked to ~/.claude/agents/<name>.md
-│   └── docs/          # human-facing workflow docs (not installed anywhere)
-├── tmux/.tmux.conf    # symlinked to ~/.tmux.conf
-└── install.sh         # idempotent symlink setup
+│   ├── CLAUDE.md      # ~/.claude/CLAUDE.md に symlink — 個人グローバル設定。このマシンの全プロジェクトに適用される
+│   ├── skills/<name>/SKILL.md   # ディレクトリごと ~/.claude/skills/<name> に symlink
+│   ├── agents/<name>.md         # ~/.claude/agents/<name>.md に symlink
+│   └── docs/          # 人間向けワークフロー説明（どこにもインストールされない）
+├── tmux/.tmux.conf    # ~/.tmux.conf に symlink
+└── install.sh         # idempotent な symlink セットアップ
 ```
 
-**Do not confuse `claude/CLAUDE.md` with this file.** This file
-(`/CLAUDE.md`, repo root) documents *this repository* for Claude Code
-sessions working in the dotfile repo itself. `claude/CLAUDE.md` is a
-different document: the user's personal global instructions (response
-style, environment-specific facts like the internal GitLab host), symlinked
-to `~/.claude/CLAUDE.md` so it applies in *every other* project on this
-machine. Edits to global behavior go in `claude/CLAUDE.md`; edits to how
-this repo works go here.
+**`claude/CLAUDE.md` とこのファイルを混同しないこと。** このファイル
+（リポジトリ直下の `/CLAUDE.md`）は、dotfile リポジトリ自体で作業する
+Claude Code セッションのために*このリポジトリ*を説明するものである。
+`claude/CLAUDE.md` は別物で、ユーザーの個人グローバル指示（回答スタイル、
+社内 GitLab のホスト名などの環境固有の前提）を書いたファイルであり、
+`~/.claude/CLAUDE.md` に symlink されて*このマシンの他の全プロジェクト*に
+適用される。グローバルな振る舞いの変更は `claude/CLAUDE.md` に、この
+リポジトリ自体の運用に関する変更はこのファイルに書く。
 
-## Commands
+## コマンド
 
 ```bash
 bash install.sh
 ```
 
-Idempotent. Symlinks every `claude/skills/*/`, `claude/agents/*.md`,
-`claude/CLAUDE.md`, and `tmux/.tmux.conf` into `~/.claude/` /
-`~/.tmux.conf`. Never overwrites an existing non-symlink or a symlink
-pointing elsewhere — it prints `[WARN]` and leaves it alone instead.
+idempotent。`claude/skills/*/`・`claude/agents/*.md`・`claude/CLAUDE.md`・
+`tmux/.tmux.conf` をそれぞれ `~/.claude/` / `~/.tmux.conf` に symlink する。
+既存の非 symlink ファイルや、別のリンク先を指す symlink は上書きせず、
+`[WARN]` を出してそのままにする。
 
-There is no lint/test/build command. There is no CI in this repo.
+lint / test / build コマンドは存在しない。CI もない。
 
-**After adding or editing a skill or agent, the Claude Code session must be
-restarted** — the skill/agent list is fixed at session startup and running
-`install.sh` again does not hot-reload it.
+**skill・agent を追加/変更した後は、Claude Code セッションの再起動が必要**。
+skill/agent 一覧はセッション起動時に固定されるため、`install.sh` を再実行
+しても反映されない。
 
-## Editing model
+## 編集の考え方
 
-Every installed file is a symlink whose source of truth lives in this repo.
-Always edit the file under `claude/` (or `tmux/`), never the `~/.claude/...`
-or `~/.tmux.conf` target — the target is just a symlink and editing it edits
-this repo's working tree anyway, but conceptually treat this repo as
-authoritative and commit here.
+インストールされる各ファイルは、正本がこのリポジトリ側にある symlink で
+ある。編集は必ず `claude/`（または `tmux/`）配下の実体に対して行い、
+`~/.claude/...` や `~/.tmux.conf` 側（symlink 先）を直接編集しないこと。
+symlink なので実体を触ってもリポジトリの作業ツリーが変わるだけではあるが、
+概念上はこのリポジトリを正とし、ここでコミットする。
 
-`.gitignore` only excludes `__pycache__/`. Before committing, confirm no
-other local generated files (daily-review reports/logs/digests, which live
-under `~/.claude/daily-review/` outside this repo, not here) have leaked in.
+`.gitignore` は `__pycache__/` のみを除外している。コミット前に、他の
+ローカル生成物（daily-review のレポート/ログ/digest。これらはこのリポジトリ
+の外、`~/.claude/daily-review/` 配下に置かれる）が紛れ込んでいないか確認
+すること。
 
-## Skills vs. agents
+## skill と agent の違い
 
-- **Skill** (`claude/skills/<name>/SKILL.md`): user- or trigger-invoked
-  entry point (`/name`), runs in the main conversation context.
-- **Agent** (`claude/agents/<name>.md`): subagent definition invoked via the
-  `Task` tool, runs in an isolated context. Has YAML frontmatter (`name`,
-  `description`, `model`, `tools`) that constrains what it can do.
+- **skill**（`claude/skills/<name>/SKILL.md`）: ユーザー起動またはトリガー
+  起動のエントリポイント（`/name`）。メインの会話コンテキストで動く。
+- **agent**（`claude/agents/<name>.md`）: `Task` ツールから呼ばれる
+  サブエージェント定義。隔離コンテキストで動く。YAML frontmatter
+  （`name`・`description`・`model`・`tools`）で権限範囲を絞る。
 
-## Key workflows implemented here
+## このリポジトリが実装している主要ワークフロー
 
-### AI-TDD (`tdd-orchestrator` skill + 3 agents)
+### AI-TDD（`tdd-orchestrator` skill + 3 agent）
 
-Full rationale in `claude/docs/TDD-with-ai.md`. The core idea: keep each
-phase's AI blind to everything except what it needs, so it can't get
-"dragged along" by existing code or jump ahead of the current test.
+背景・根拠の全文は `claude/docs/TDD-with-ai.md` にある。核となる考え方は、
+各フェーズの AI に必要最小限しか見せないことで、既存コードに「引きずられ」
+たり、現在のテストより先の実装を見越したりできないようにすること。
 
-- `tdd-orchestrator` (skill, `disable-model-invocation: true`, invoked
-  explicitly as `/tdd-orchestrator path/to/plan.md`): reads a human-authored
-  `plan.md`, drives Red → Green → Refactor serially via the `Task` tool, one
-  checklist item at a time, updating `plan.md` as it goes.
-- `tdd-test-writer` (agent, Red): writes exactly one failing test. May not
-  read the implementation file or other test items.
-- `tdd-implementer` (agent, Green): writes the minimal implementation to
-  pass that one test. May not read other tests/implementations or add
-  unrequested behavior.
-- `tdd-refactorer` (agent, Refactor): improves the just-written
-  implementation without changing behavior, or explicitly does nothing.
+- `tdd-orchestrator`（skill、`disable-model-invocation: true`、
+  `/tdd-orchestrator path/to/plan.md` で明示的に起動）: 人間が書いた
+  `plan.md` を読み、`Task` ツール経由で Red → Green → Refactor を1項目ずつ
+  直列実行し、`plan.md` を更新していく。
+- `tdd-test-writer`（agent、Red 担当）: 失敗するテストを1つだけ書く。
+  実装ファイル本体や他のテスト項目は読めない。
+- `tdd-implementer`（agent、Green 担当）: そのテストを通す最小実装のみを
+  書く。他のテスト/実装ファイル全体を読んだり、依頼外の機能を追加したり
+  できない。
+- `tdd-refactorer`（agent、Refactor 担当）: 直前の実装を振る舞いを変えずに
+  改善する、または「変更なし」と明示して終える。
 
-Hard rules the orchestrator enforces: 1 test per cycle, 3 consecutive Green
-failures escalates to the human, any hint of "delete/skip the test to make
-it pass" escalates immediately, `plan.md`'s test list is consumed
-top-to-bottom without reading ahead. `plan.md` is written by the human, not
-generated by the AI — it lives wherever the target feature lives, not in
-this repo.
+orchestrator が強制するルール: 1サイクル1テスト、同一テストで Green が
+3回連続失敗したら人間にエスカレーション、「テストを削除/skip して通す」
+という兆候が出たら即エスカレーション、`plan.md` のテスト一覧は先読みせず
+上から順に消化する。`plan.md` は AI が生成するのではなく人間が書き、
+対象機能のあるプロジェクト側に置く（このリポジトリには置かない）。
 
-### daily-review (`claude/skills/daily-review/`)
+### daily-review（`claude/skills/daily-review/`）
 
-Analyzes Claude Code's own conversation history (`~/.claude/projects/*/*.jsonl`,
-across all projects) to propose — never apply — improvements: new skills,
-new subagents, `CLAUDE.md` additions, `settings.json` permission entries.
-Details and the Automator/cron setup in `claude/docs/daily-review-operations.md`.
+Claude Code 自身の会話履歴（全プロジェクト横断の
+`~/.claude/projects/*/*.jsonl`）を分析し、新しい skill・subagent・
+`CLAUDE.md` への追記・`settings.json` の permissions 追加を*提案のみ*行う
+（自動適用はしない）。詳細と Automator/cron のセットアップ手順は
+`claude/docs/daily-review-operations.md` を参照。
 
-- `scripts/extract_conversations.py` compresses raw jsonl into a digest
-  (`~/.claude/daily-review/digest.md`) since raw history is too large to
-  read directly. Since-timestamp defaults to the previous report's filename
-  timestamp (local time, not UTC — a documented gotcha) — do not rename
-  report files out of the `review_YYYYMMDD_HHMMSS.md` pattern, it breaks
-  that lookup.
-- `scripts/run_daily_review.sh` is the unattended entry point (`claude -p
-  ... --dangerously-skip-permissions`), meant to be triggered by a calendar
-  alarm/cron. If the skill's operations grow beyond
-  python3/mkdir/date/echo/Write-a-report, re-check whether
-  `--dangerously-skip-permissions` is still appropriate.
-- Reports/logs/digests are local generated artifacts under
-  `~/.claude/daily-review/` — never commit them to this repo.
+- `scripts/extract_conversations.py` は生の jsonl が巨大すぎて直接読めない
+  ため、圧縮したダイジェスト（`~/.claude/daily-review/digest.md`）を生成
+  する。基準時刻（since）は既定で直近レポートのファイル名タイムスタンプ
+  （ローカル時刻。UTC ではない — ハマりどころとして明記されている）から
+  決まる。レポートファイル名を `review_YYYYMMDD_HHMMSS.md` の命名規則から
+  外すと、この基準時刻の取得が壊れる。
+- `scripts/run_daily_review.sh` は無人実行用のエントリポイント
+  （`claude -p ... --dangerously-skip-permissions`）で、カレンダーアラーム
+  や cron から起動される想定。skill の操作範囲が python3/mkdir/date/
+  echo/レポート Write を超えて拡張される場合は、
+  `--dangerously-skip-permissions` の妥当性を再評価すること。
+- レポート/ログ/digest はローカルの生成物（`~/.claude/daily-review/` 配下）
+  であり、このリポジトリには絶対にコミットしない。
 
-### ouen-message (`claude/skills/ouen-message/`)
+### ouen-message（`claude/skills/ouen-message/`）
 
-Sends a time-of-day-appropriate Slack encouragement message via
-`~/.slack/send-ouen.sh` (a script outside this repo). Tone/content rules are
-table-driven by time of day inside `SKILL.md`.
+`~/.slack/send-ouen.sh`（このリポジトリ外のスクリプト）経由で、時間帯に
+応じた応援メッセージを Slack に送る。トーン・文面のルールは `SKILL.md`
+内で時間帯テーブルとして定義されている。
 
-## Conventions to follow when editing files in this repo
+## このリポジトリで編集する際の規約
 
-- Written prose in this repo is Japanese; keep new/edited docs, skill
-  bodies, and agent bodies in Japanese unless the existing file is English.
-- Commit messages, PR descriptions, and design docs for content generated
-  *while working in this repo* should follow the style rules in
-  `claude/CLAUDE.md` (conclusion-first, bullet-heavy, keep file
-  paths/commands/code out of the prose sentence and in their own code
-  block) — those rules are personal-global but the user applies them to
-  dotfile work too.
+- リポジトリ内の地の文は日本語。既存ファイルが英語である場合を除き、
+  新規/編集する doc・skill 本文・agent 本文は日本語で書く。
+- *このリポジトリで作業する際*に生成するコミットメッセージ・PR 説明・
+  設計ドキュメントは、`claude/CLAUDE.md` に書かれたスタイル規約（結論を
+  先に・箇条書き中心・ファイルパスやコマンドやコードは地の文に埋め込まず
+  別のコードブロックにする）に従う。これらは本来「個人グローバル設定」
+  だが、ユーザーは dotfile リポジトリ自体の作業にも適用している。
