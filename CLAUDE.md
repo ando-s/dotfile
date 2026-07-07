@@ -73,57 +73,17 @@ symlink なので実体を触ってもリポジトリの作業ツリーが変わ
 
 ## このリポジトリが実装している主要ワークフロー
 
-### AI-TDD（`tdd-orchestrator` skill + 3 agent）
+- **AI-TDD**（`claude/skills/tdd-orchestrator/` + `claude/agents/tdd-*.md`）:
+  `/tdd-orchestrator path/to/plan.md` で起動し、Red→Green→Refactor を
+  隔離 agent で1テストずつ直列実行する。詳細は `claude/docs/TDD-with-ai.md`。
+- **daily-review**（`claude/skills/daily-review/`）: Claude Code の会話履歴を
+  分析し、改善案を*提案のみ*行う（自動適用はしない）。詳細は
+  `claude/docs/daily-review-operations.md`。
+- **ouen-message**（`claude/skills/ouen-message/`）: 時間帯に応じた応援
+  メッセージを Slack に送る。
 
-背景・根拠の全文は `claude/docs/TDD-with-ai.md` にある。核となる考え方は、
-各フェーズの AI に必要最小限しか見せないことで、既存コードに「引きずられ」
-たり、現在のテストより先の実装を見越したりできないようにすること。
-
-- `tdd-orchestrator`（skill、`disable-model-invocation: true`、
-  `/tdd-orchestrator path/to/plan.md` で明示的に起動）: 人間が書いた
-  `plan.md` を読み、`Task` ツール経由で Red → Green → Refactor を1項目ずつ
-  直列実行し、`plan.md` を更新していく。
-- `tdd-test-writer`（agent、Red 担当）: 失敗するテストを1つだけ書く。
-  実装ファイル本体や他のテスト項目は読めない。
-- `tdd-implementer`（agent、Green 担当）: そのテストを通す最小実装のみを
-  書く。他のテスト/実装ファイル全体を読んだり、依頼外の機能を追加したり
-  できない。
-- `tdd-refactorer`（agent、Refactor 担当）: 直前の実装を振る舞いを変えずに
-  改善する、または「変更なし」と明示して終える。
-
-orchestrator が強制するルール: 1サイクル1テスト、同一テストで Green が
-3回連続失敗したら人間にエスカレーション、「テストを削除/skip して通す」
-という兆候が出たら即エスカレーション、`plan.md` のテスト一覧は先読みせず
-上から順に消化する。`plan.md` は AI が生成するのではなく人間が書き、
-対象機能のあるプロジェクト側に置く（このリポジトリには置かない）。
-
-### daily-review（`claude/skills/daily-review/`）
-
-Claude Code 自身の会話履歴（全プロジェクト横断の
-`~/.claude/projects/*/*.jsonl`）を分析し、新しい skill・subagent・
-`CLAUDE.md` への追記・`settings.json` の permissions 追加を*提案のみ*行う
-（自動適用はしない）。詳細と Automator/cron のセットアップ手順は
-`claude/docs/daily-review-operations.md` を参照。
-
-- `scripts/extract_conversations.py` は生の jsonl が巨大すぎて直接読めない
-  ため、圧縮したダイジェスト（`~/.claude/daily-review/digest.md`）を生成
-  する。基準時刻（since）は既定で直近レポートのファイル名タイムスタンプ
-  （ローカル時刻。UTC ではない — ハマりどころとして明記されている）から
-  決まる。レポートファイル名を `review_YYYYMMDD_HHMMSS.md` の命名規則から
-  外すと、この基準時刻の取得が壊れる。
-- `scripts/run_daily_review.sh` は無人実行用のエントリポイント
-  （`claude -p ... --dangerously-skip-permissions`）で、カレンダーアラーム
-  や cron から起動される想定。skill の操作範囲が python3/mkdir/date/
-  echo/レポート Write を超えて拡張される場合は、
-  `--dangerously-skip-permissions` の妥当性を再評価すること。
-- レポート/ログ/digest はローカルの生成物（`~/.claude/daily-review/` 配下）
-  であり、このリポジトリには絶対にコミットしない。
-
-### ouen-message（`claude/skills/ouen-message/`）
-
-`~/.slack/send-ouen.sh`（このリポジトリ外のスクリプト）経由で、時間帯に
-応じた応援メッセージを Slack に送る。トーン・文面のルールは `SKILL.md`
-内で時間帯テーブルとして定義されている。
+各ワークフローの手順・ルールは対応する `SKILL.md` / `docs/` に書かれている
+ため、ここでは重複させない。
 
 ## このリポジトリで編集する際の規約
 
