@@ -1,0 +1,3 @@
+- [Pane分割は縦横比1:1基準](pane-split-aspect-ratio.md) — Herdrでpane追加時は見やすい正方形に近い形になる方向で分割する
+- [Nuts dual-write Writerは暫定](nuts-dualwrite-writer-transitional.md) — 副作用がTX内・write_to_spica!前でも許容される理由（notify=決済成功/Writer将来削除/SBPS稼働済み）
+- [Herdr通知はMac通知で受ける](herdr-mac-notification-setup.md) — delivery="terminal"でWezTerm/Ghostty経由、webhookは使わない
