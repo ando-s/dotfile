@@ -5,7 +5,7 @@
 - マージリクエスト（MR）のレビュー依頼、ワークツリー作成依頼を受けた場合、セッション名は `Codereview MR !<MRのID>` というフォーマットで 名前をつける。
 - **MRレビューは必ずワークツリーを切ってから行う。** 本体repo（master）で `git checkout` してブランチに切り替えない。本体repoを汚さず、 ブランチのコードに対して rspec/rubocop を実行できるようにするため。 読むだけでもワークツリー内で作業する。
 - **ワークツリー作成は EnterWorktree ツールを使う。** 手動の `git worktree` コマンドにフォールバックしない。ツールが失敗した場合は原因（ブランチ未fetch等）を解消して再実行する。
-  - 例外: web-application は ssh 先の comicdev で作業する。worktree も comicdev 上で `git worktree` コマンドで作る。手順は `~/.config/claude/profiles/ando/CLAUDE.md` の「作業場所」。
+  - 例外: web-application は ssh 先の comicdev で作業する。worktree も comicdev 上で `git worktree` コマンドで作る。作業場所・ssh の叩き方・画面への到達は `~/dev/dotfile/claude/docs/web-application-workspace.md`。
 
 ## MR作成時の操作
 
