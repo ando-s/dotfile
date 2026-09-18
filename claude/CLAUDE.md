@@ -5,7 +5,7 @@
 - マージリクエスト（MR）のレビュー依頼、ワークツリー作成依頼を受けた場合、セッション名は `Codereview MR !<MRのID>` というフォーマットで 名前をつける。
 - **MRレビューは必ずワークツリーを切ってから行う。** 本体repo（master）で `git checkout` してブランチに切り替えない。本体repoを汚さず、 ブランチのコードに対して rspec/rubocop を実行できるようにするため。 読むだけでもワークツリー内で作業する。
 - **ワークツリー作成は EnterWorktree ツールを使う。** 手動の `git worktree` コマンドにフォールバックしない。ツールが失敗した場合は原因（ブランチ未fetch等）を解消して再実行する。
-  - 例外: web-application は ssh 先の comicdev で作業する。worktree も comicdev 上で `git worktree` コマンドで作る。作業場所・ssh の叩き方・画面への到達は `~/dev/dotfile/claude/docs/web-application-workspace.md`。
+  - 例外: web-application は comicdev で作業する。Herdr のペインを分割して ssh で入り、そこで claude を起動してタスクを渡す。ローカルから ssh でコマンドを流す形にしない。worktree も comicdev 上で `git worktree` コマンドで作る。手順・ssh の叩き方・画面への到達は `~/dev/dotfile/claude/docs/web-application-workspace.md`。
 
 ## MR作成時の操作
 
@@ -17,6 +17,19 @@
 - **メンションは MR運用ルールに従う。** 返信には元コメント著者へのメンションを付ける。ルールの全文は `packs/nuts/docs/implementation/MR運用ルール.md`
 - **resolve はしない。** スレッドの解決はユーザーが手動で行う。
 - **依頼されていないコメントは投稿しない。** 投稿するのは、指摘対応・返信・レビュー指摘をユーザーから依頼された分だけ。
+
+## 外部ツールへの到達経路
+
+- Google Workspace（ドキュメント・スライド・スプレッドシート・Chat・ドライブ）は `gws` CLI で読み書きする。ドキュメントの URL を WebFetch で取りにいかない（認証が要り 401 になる）。
+- Metabase の実 DB は `mcp__metabase__` を使う。`mcp__metabase-read__` は同じ ID でもステージングに繋がる。どちらも Metabase 上の質問・ダッシュボードの作成と更新ができ、DB のデータは変更できない。
+- GitLab は `glab`（`-R comic-festa-group/web-application` を明示）。JIRA は `jira` CLI。
+- URL の中身が取れないときは、手段を次々に試さず、ユーザーに内容の貼り付けを依頼する。
+
+## 副作用のある操作は明示承認の後に行う
+
+- JIRA チケット・GitLab コメント・Chat メッセージ・メールの作成・更新・削除は、最終内容を全文示して「この内容で作成していいですか」と聞き、明確な承認を得てから実行する。
+- 下書きへの「良さそう」「いいね」は内容への同意で、実行の承認ではない。
+- 複数件をまとめて作る操作は、テンプレートと1件目の文面を先に合意する。
 
 ## 検証・根拠付け
 
