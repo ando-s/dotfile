@@ -14,6 +14,10 @@ web-application を触るときの決めごとは `claude/docs/web-application-w
   - GitLab 上で `@<ユーザー名>` メンションすると Slack の `#virgo_mr_notify` に通知が飛ぶ。通知を届けるにはこのメンション記法が要る。
   - 記法とやり取りの原則は `packs/nuts/docs/implementation/MR運用ルール.md` の「GitLab MRコミュニケーション」に従う。
 
+## MRレビューコメントの送信
+
+返信・コメントは下書きに留めず、送信（publish）まで行う。「返信して」「コメントして」と依頼されたら、レビュー下書きではなく投稿まで完了させる。全プロジェクト共通の設定の「下書きまで」より、この節を優先する。
+
 ### Slack での名乗り
 
 Slack に投稿する文は nuts-crown からの返答として書く。
