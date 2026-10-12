@@ -19,7 +19,8 @@ dotfile/
 │   ├── CLAUDE.md      # ~/.claude/CLAUDE.md に symlink — 個人グローバル設定。このマシンの全プロジェクトに適用される
 │   ├── skills/<name>/SKILL.md   # ディレクトリごと ~/.claude/skills/<name> に symlink
 │   ├── agents/<name>.md         # ~/.claude/agents/<name>.md に symlink
-│   └── docs/          # 人間向けワークフロー説明（どこにもインストールされない）
+│   ├── docs/          # 人間向けワークフロー説明（どこにもインストールされない）
+│   └── templates/     # プロジェクトにコピーして使う雛形（どこにもインストールされない）
 ├── tmux/.tmux.conf    # ~/.tmux.conf に symlink
 └── install.sh         # idempotent な symlink セットアップ
 ```
@@ -79,6 +80,9 @@ symlink なので実体を触ってもリポジトリの作業ツリーが変わ
 - **daily-review**（`claude/skills/daily-review/`）: Claude Code の会話履歴を
   分析し、改善案を*提案のみ*行う（自動適用はしない）。詳細は
   `claude/docs/daily-review-operations.md`。
+- **Codex と Claude Code の分担開発**（`claude/templates/codex-claude/`）:
+  新しいプロジェクトに `cp -Rn` でコピーして使う雛形。詳細は
+  `claude/docs/codex-claude-workflow.md`。
 - **ouen-message**（`claude/skills/ouen-message/`）: 時間帯に応じた応援
   メッセージを Slack に送る。
 
