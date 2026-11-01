@@ -1,6 +1,6 @@
 ---
 name: weekly-rules
-description: 直近1週間の Claude Code の会話から、ユーザーが Claude を直した場面を集め、繰り返されたものを CLAUDE.md・スキル・メモリの規則の案にして、ユーザーと1つずつ決める。「週次の振り返り」「規則の案を作って」「/weekly-rules」と言われた時に使う。Todoist の毎週のタスクから呼ばれる。
+description: 直近1週間の Claude Code の会話から、ユーザーが Claude を直した場面を集め、繰り返されたものを CLAUDE.md・スキル・各リポジトリの CLAUDE.md の規則の案にして、ユーザーと1つずつ決める。「週次の振り返り」「規則の案を作って」「/weekly-rules」と言われた時に使う。Todoist の毎週のタスクから呼ばれる。
 argument-hint: "[--days N]（省略時は前回の実行以降）"
 allowed-tools: Read, Write, Edit, Agent, Bash(python3 *), Bash(date *), Bash(git *)
 ---
@@ -46,7 +46,7 @@ Agent には、材料のパス、下の拾い方と分け方、出力先 `~/.cla
 
 - `~/.claude/CLAUDE.md`（正本は `~/dev/dotfile/claude/CLAUDE.md`）
 - `~/dev/dotfile/claude/skills/` の各スキル（文章は `writing-for-others`）
-- 各プロジェクトのメモリ（`~/.claude/projects/*/memory/`）
+- 作業したフォルダ・リポジトリの CLAUDE.md（自動メモリはオフにしているので、メモリには置かない）
 
 | 分け方 | 扱い |
 |---|---|
@@ -73,7 +73,7 @@ Agent には、材料のパス、下の拾い方と分け方、出力先 `~/.cla
 ## 5. 採った案を書き込む
 
 - 採った案だけを書き込む。dotfile は main に直接コミットする。push はユーザーが頼んだときだけ。
-- メモリに置く案は、メモリの書き方（frontmatter と MEMORY.md の1行）に従う。
+- チームのリポジトリ（会社の GitLab のグループのもの）に置く案は、直接書かず MR にする。
 - 最後に、実行した日時を記録する。
 
 ```bash

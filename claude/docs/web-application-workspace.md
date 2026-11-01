@@ -20,7 +20,7 @@ comicdev で起動した claude は、comicdev の `~/.claude/CLAUDE.md` と wor
 `.claude/rules/` を読む。ローカルから ssh でコマンドを流す形ではこれらが読まれず、リポジトリの
 決めごとが効かないまま作業することになる。
 
-ペイン操作の細部は記憶 `herdr-pane-claude-agent-workflow` に従う。
+herdrの構文は版で変わるので、`herdr --help`と`herdr --skill`の出力を読んでから操作する。
 
 1. `test "${HERDR_ENV:-}" = 1` を確認する。Herdr の外なら、この手順は使えないとユーザーに伝えて止める
 2. `herdr pane split --current --direction right --no-focus` で兄弟ペインを作り、
@@ -36,6 +36,19 @@ comicdev で起動した claude は、comicdev の `~/.claude/CLAUDE.md` と wor
 
 タスク文には作業対象のブランチ・MR 番号・成果物の置き場所を書く。ローカルの会話でしか出ていない
 前提は、向こうの claude には伝わらない。
+
+ペインの操作の細部:
+
+- 分割の向きは`herdr pane layout --pane "$HERDR_PANE_ID"`で見て、横長なら右、縦長なら下にする
+- pane_idは応答のJSONから読む。番号から組み立てない
+- claudeは引数でプロンプトを渡さず、非対話のフラグも付けない
+- 完了は、背景のタブなら`--status done`、ユーザーが見ているタブなら`--status idle`で待つ
+- 追加の指示も`herdr pane run <id> "<指示>"`で渡す
+- 隣のペインを読むときは、`herdr pane neighbor --current --direction left`の`result.neighbor.neighbor_pane_id`を取り、`herdr pane read <id> --source recent-unwrapped --lines 300`で読む
+- 自分が作っていないペイン・タブ・ワークスペースは閉じない。`herdr server stop`やメインプロセスのkillはしない
+
+「ペインで進めて」と言われたときは、comicdev以外の作業でも、4と5を除いて同じ手順で別のエージェントを立てる。
+既定は今のタブ・今の作業ディレクトリの隣のペインで、ワークスペース・タブ・worktreeはユーザーが言ったときだけ作る。
 
 ## 動作確認
 
@@ -93,14 +106,38 @@ curl -s -H "Host: sa2.comicdev.iowl.jp" -b "festa_auth_dev=<users.auth_token>" \
 - ログインは `users.auth_token` の値を `Settings.browser_auth_token_key` の Cookie に入れる
   （開発環境では `festa_auth_dev`）
 - ブラウザで通すときは worktree の nginx に公開ホスト名を `VIRTUAL_HOST` として持たせる。
-  primary と同じホスト名を同時に割り当てると取り合いになる。手順と注意は
-  `~/.claude/projects/-Users-s-ando-dev-spica-web-application/memory/worktree-browser-verify-public-host.md`
+  primary と同じホスト名を同時に割り当てると取り合いになる。
+  - worktreeで`scripts/docker-worktree.sh up`を実行して80番を取り、公開ホスト名で開く。80番を持つ本体のスタックは止まるので、ほかのセッションが使っていないか先に確かめる。戻すときは本体のディレクトリで`docker compose up -d`
+  - Coreは`entry_form_url`をhttpsだけ受け付ける。httpのlocalhostでは申込が422になる
+  - `APP_HOST_NAME`は公開ホスト名にし、webだけでなくwebpackのサービスにも渡す。webpackの3035番もホストへ公開する。画面のJSの取得先がこの値で決まり、localhostのままでは画面のJSが動かない
+  - `.env`は読み書きが許可されていないので、これらは`docker-compose.override.yml`のenvironmentで上書きする
 - 入会と都度課金の確認ページは申込の前提（コースの指定やセッション）が要る。前提が無いと 302 で入口へ戻る
 
 ## 開発環境のデータ
 
 worktree の DB は独立で、`db:seed` だけではユーザーもコースのマスタも入らない。本体の
-development DB をボリュームごとコピーすると揃った状態から始められる（同じ記憶ファイルに手順がある）。
+development DB をボリュームごとコピーすると揃った状態から始められる。
+
+```bash
+docker run --rm -v <primary>_dbdatastore:/from -v <worktree>_dbdatastore:/to alpine cp -a /from/. /to/
+```
+
+このコマンドの `cp -a` の引数は、元の記録に無かったものを補った形で、動かしては確かめていない。初めて使うときは、コピー先のボリュームの中身を確かめる。
+
+## Herdrの設定
+
+- comicdevへは`herdr --remote comicdev-herdr --remote-keybindings server`で繋ぐ。この接続では`[keys]`と`[[keys.command]]`もEC2側の`config.toml`から読まれ、手元の`[keys]`は使われない
+- キー割り当ての正本は手元の`config.toml`の`[keys]`以下。`~/.local/bin/herdr-sync-keys`でEC2側へ写してreload-configする。EC2側の`[keys]`は直接編集しない
+- `[terminal]`・`[ui]`・`[theme]`・`[experimental]`はサーバー側（EC2）が読む
+- 誤ったテーブルに書いた項目は警告なしで捨てられ、`herdr server reload-config`は成功を返す。書く前に`herdr --default-config`で項目の属するテーブルを確かめ、反映は挙動で確かめる
+- `herdr agent focus`の対象はタブ名では通らない。`herdr agent rename <ペインID> <名前>`で名前を付けてから指定する
+- `herdr update`はherdrの外で実行する（セッション内では拒否される）
+
+## reviewr
+
+- 対象のリポジトリは、開いた時点でフォーカスしていたペインの作業ディレクトリで決まる。ワークツリーに入ってから`herdr plugin action invoke open --plugin persiyanov.reviewr`で開き直す（開いていれば先に`close`）
+- 開き直したら`herdr pane list --workspace <ws>`で作業ディレクトリがワークツリーになっているか確かめる
+- コメントは送る前に閉じると消える
 
 ## comicdev 側の Claude の記憶
 
