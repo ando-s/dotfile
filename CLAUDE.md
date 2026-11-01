@@ -60,8 +60,8 @@ symlink なので実体を触ってもリポジトリの作業ツリーが変わ
 概念上はこのリポジトリを正とし、ここでコミットする。
 
 `.gitignore` は `__pycache__/` のみを除外している。コミット前に、他の
-ローカル生成物（daily-review のレポート/ログ/digest。これらはこのリポジトリ
-の外、`~/.claude/daily-review/` 配下に置かれる）が紛れ込んでいないか確認
+ローカル生成物（weekly-rules の材料と案。これらはこのリポジトリの外、
+`~/.claude/weekly-rules/` 配下に置かれる）が紛れ込んでいないか確認
 すること。
 
 ## skill と agent の違い
@@ -77,9 +77,9 @@ symlink なので実体を触ってもリポジトリの作業ツリーが変わ
 - **AI-TDD**（`claude/skills/tdd-orchestrator/` + `claude/agents/tdd-*.md`）:
   `/tdd-orchestrator path/to/plan.md` で起動し、Red→Green→Refactor を
   隔離 agent で1テストずつ直列実行する。詳細は `claude/docs/TDD-with-ai.md`。
-- **daily-review**（`claude/skills/daily-review/`）: Claude Code の会話履歴を
-  分析し、改善案を*提案のみ*行う（自動適用はしない）。詳細は
-  `claude/docs/daily-review-operations.md`。
+- **weekly-rules**（`claude/skills/weekly-rules/`）: 直近1週間の会話から、
+  ユーザーが Claude を直した場面を集め、規則の案にしてユーザーと1つずつ決める
+  （自動適用はしない）。Todoist の毎週のタスクから `/weekly-rules` で呼ぶ。
 - **Codex と Claude Code の分担開発**（`claude/templates/codex-claude/`）:
   新しいプロジェクトに `cp -Rn` でコピーして使う雛形。詳細は
   `claude/docs/codex-claude-workflow.md`。
