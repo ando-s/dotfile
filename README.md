@@ -8,7 +8,7 @@
 dotfile/
 ├── claude/
 │   ├── CLAUDE.md     # ~/.claude/CLAUDE.md に symlink（個人グローバル設定）
-│   ├── settings.json # ~/.claude/settings.json に symlink（フック・権限・環境変数）
+│   ├── settings.json # 共有の設定。~/.claude/settings.machine.json と合成して ~/.claude/settings.json を作る
 │   ├── profiles/
 │   │   └── ando/
 │   │       └── CLAUDE.md  # ~/.config/claude/profiles/ando/CLAUDE.md に symlink（starbase 向け）
@@ -17,7 +17,7 @@ dotfile/
 │   ├── docs/         # ワークフロー説明（人間向け）
 │   └── templates/    # プロジェクトにコピーして使う雛形（install.sh では入れない）
 ├── tmux/
-│   └── .tmux.conf    # ~/.tmux.conf に symlink される
+│   └── .tmux.conf    # ~/.tmux.conf に symlink される（最後に ~/.tmux.local.conf を読む）
 └── install.sh        # symlink セットアップ（idempotent）
 ```
 
@@ -34,7 +34,10 @@ Claude Code 起動中の場合は **再起動**（agent / skill list は起動�
 ### 個人グローバル設定
 
 - `claude/CLAUDE.md` — 全プロジェクト共通の個人的好み（コミュニケーションスタイル・開発方針）
-- `claude/settings.json` — Claude Code のユーザー設定（毎回のメッセージに日本語で返答する指示を添えるフック、通知、権限など）
+- `claude/settings.json` — Claude Code のユーザー設定のうち、どのマシンでも使うもの（毎回のメッセージに日本語で返答する指示を添えるフック、通知、権限など）
+  - install.sh が、これとマシン固有の `~/.claude/settings.machine.json`（dotfile には入れない）を合成して `~/.claude/settings.json` を作る。Claude Code はユーザー全体の設定として `~/.claude/settings.json` しか読まないため、link ではなく合成したファイルにしている
+  - 合成のしかた（`claude/scripts/merge-settings.jq`）: オブジェクトはキーごとに重ね、値が食い違えばマシン固有の値を使う。配列（`permissions.allow`、フックの各イベント）は両方を足す
+  - Claude Code の画面（`/config` など）で変えた設定は `~/.claude/settings.json` に書かれ、install.sh はその後は上書きしない。残したい変更は、共有か `settings.machine.json` に移してから `~/.claude/settings.json` を消し、install.sh を実行し直す
 
 ### プロファイル別設定
 
@@ -63,4 +66,4 @@ Claude Code 起動中の場合は **再起動**（agent / skill list は起動�
 
 ### tmux 設定
 
-- `tmux/.tmux.conf` — `~/.tmux.conf` に symlink される
+- `tmux/.tmux.conf` — `~/.tmux.conf` に symlink される。マシン固有の設定は `~/.tmux.local.conf`（dotfile には入れない）に書く。最後に読むので、共有の設定より優先される

@@ -67,22 +67,53 @@ if [ -f "$claude_md_src" ]; then
   fi
 fi
 
-echo "==> Installing settings.json"
+# settings.json は link せず、共有の claude/settings.json と、マシン固有の
+# ~/.claude/settings.machine.json（dotfile には入れない）を合成して作る。
+# Claude Code はユーザー全体の設定として ~/.claude/settings.json しか読まないため。
+# 作った後に Claude Code 側で書き換わった場合は上書きしない。
+echo "==> Installing settings.json (shared + settings.machine.json)"
 settings_src="$DOTFILE_DIR/claude/settings.json"
+settings_machine="$CLAUDE_DIR/settings.machine.json"
 settings_target="$CLAUDE_DIR/settings.json"
+settings_mark="$CLAUDE_DIR/.settings.generated.sha256"
 if [ -f "$settings_src" ]; then
-  if [ -L "$settings_target" ]; then
-    current=$(readlink "$settings_target")
-    if [ "$current" = "$settings_src" ]; then
-      echo "  [ok] settings.json (already linked)"
-    else
-      echo "  [WARN] settings.json -> $current (different target, leaving alone)"
-    fi
-  elif [ -e "$settings_target" ]; then
-    echo "  [WARN] settings.json exists as non-symlink, leaving alone"
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "  [WARN] jq not found, skipping settings.json"
   else
-    ln -s "$settings_src" "$settings_target"
-    echo "  [link] settings.json"
+    settings_tmp=$(mktemp)
+    machine_in="$settings_machine"
+    if [ ! -f "$machine_in" ]; then
+      machine_in=$(mktemp)
+      echo '{}' > "$machine_in"
+    fi
+    jq -n --slurpfile shared "$settings_src" --slurpfile machine "$machine_in" \
+      -f "$DOTFILE_DIR/claude/scripts/merge-settings.jq" > "$settings_tmp"
+    new_sum=$(shasum -a 256 "$settings_tmp" | cut -d' ' -f1)
+    write_settings=false
+    if [ -L "$settings_target" ]; then
+      rm "$settings_target"
+      write_settings=true
+    elif [ -e "$settings_target" ]; then
+      current_sum=$(shasum -a 256 "$settings_target" | cut -d' ' -f1)
+      if [ "$current_sum" = "$new_sum" ]; then
+        echo "  [ok] settings.json (up to date)"
+      elif [ -f "$settings_mark" ] && [ "$current_sum" = "$(cat "$settings_mark")" ]; then
+        write_settings=true
+      else
+        echo "  [WARN] settings.json was changed after it was generated, leaving alone"
+        echo "         move the changes into settings.machine.json or claude/settings.json, delete settings.json, and run again"
+      fi
+    else
+      write_settings=true
+    fi
+    if [ "$write_settings" = true ]; then
+      mv "$settings_tmp" "$settings_target"
+      chmod 600 "$settings_target"
+      echo "$new_sum" > "$settings_mark"
+      echo "  [generate] settings.json"
+    else
+      rm -f "$settings_tmp"
+    fi
   fi
 fi
 
