@@ -9,6 +9,9 @@ dotfile/
 ├── claude/
 │   ├── CLAUDE.md     # ~/.claude/CLAUDE.md に symlink（個人グローバル設定）
 │   ├── settings.json # ~/.claude/settings.json に symlink（フック・権限・環境変数）
+│   ├── profiles/
+│   │   └── ando/
+│   │       └── CLAUDE.md  # ~/.config/claude/profiles/ando/CLAUDE.md に symlink（starbase 向け）
 │   ├── skills/       # ~/.claude/skills/ に symlink される
 │   ├── agents/       # ~/.claude/agents/ に symlink される
 │   ├── docs/         # ワークフロー説明（人間向け）
@@ -32,6 +35,14 @@ Claude Code 起動中の場合は **再起動**（agent / skill list は起動�
 
 - `claude/CLAUDE.md` — 全プロジェクト共通の個人的好み（コミュニケーションスタイル・開発方針）
 - `claude/settings.json` — Claude Code のユーザー設定（毎回のメッセージに日本語で返答する指示を添えるフック、通知、権限など）
+
+### プロファイル別設定
+
+プロファイルは `CLAUDE_CONFIG_DIR` で切り替える。そのプロファイルで起動したセッションだけが読む。
+
+- `claude/profiles/ando/CLAUDE.md` — `~/dev/spica/starbase` 向けの作業で使う profile `ando` の設定（作業場所・作業完了時の通知）
+  - リンク先: `~/.config/claude/profiles/ando/CLAUDE.md`
+  - 起動条件: `CLAUDE_CONFIG_DIR=~/.config/claude/profiles/ando`
 
 ### AI-TDD ワークフロー
 

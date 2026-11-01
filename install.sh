@@ -1,5 +1,6 @@
 #!/bin/bash
 # Install Claude Code skills/agents to personal scope (~/.claude/)
+# profile ando (starbase) の CLAUDE.md は ~/.config/claude/profiles/ando/ に link する
 # Idempotent: safe to run multiple times. Existing files are not overwritten.
 
 set -e
@@ -82,6 +83,26 @@ if [ -f "$settings_src" ]; then
   else
     ln -s "$settings_src" "$settings_target"
     echo "  [link] settings.json"
+  fi
+fi
+
+echo "==> Installing profile CLAUDE.md (profile: ando / starbase)"
+profile_md_src="$DOTFILE_DIR/claude/profiles/ando/CLAUDE.md"
+profile_md_target="$HOME/.config/claude/profiles/ando/CLAUDE.md"
+if [ -f "$profile_md_src" ]; then
+  mkdir -p "$(dirname "$profile_md_target")"
+  if [ -L "$profile_md_target" ]; then
+    current=$(readlink "$profile_md_target")
+    if [ "$current" = "$profile_md_src" ]; then
+      echo "  [ok] profiles/ando/CLAUDE.md (already linked)"
+    else
+      echo "  [WARN] profiles/ando/CLAUDE.md -> $current (different target, leaving alone)"
+    fi
+  elif [ -e "$profile_md_target" ]; then
+    echo "  [WARN] profiles/ando/CLAUDE.md exists as non-symlink, leaving alone"
+  else
+    ln -s "$profile_md_src" "$profile_md_target"
+    echo "  [link] profiles/ando/CLAUDE.md"
   fi
 fi
 
