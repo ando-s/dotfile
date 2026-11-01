@@ -1,0 +1,71 @@
+{
+  "env": {
+    "CLAUDE_CODE_NO_FLICKER": "1"
+  },
+  "permissions": {
+    "allow": [
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_take_screenshot",
+      "Bash(aws amplify *)",
+      "mcp__playwright__browser_click",
+      "Bash(fly status *)"
+    ],
+    "defaultMode": "auto"
+  },
+  "skillOverrides": {
+    "anthropic-skills:docs": "off",
+    "anthropic-skills:docx": "off",
+    "anthropic-skills:pptx": "off",
+    "anthropic-skills:xlsx": "off",
+    "anthropic-skills:pdf": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:built-in-browser": "off",
+    "anthropic-skills:chrome-browser": "off",
+    "anthropic-skills:google-workspace": "off",
+    "anthropic-skills:deep-research": "off",
+    "anthropic-skills:canvas-design": "off",
+    "anthropic-skills:morning": "off",
+    "anthropic-skills:import-memory": "off",
+    "anthropic-skills:slack-gif-creator": "off"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"返答は必ず日本語で書く。ツールの結果が英語でも、作業の途中にメッセージが届いたあとも英語に切り替えない。コード・コマンド・固有名詞はそのままでよい。\"}}'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.message // \"入力が必要です\"' | { read -r msg; osascript -e \"display notification \\\"$msg\\\" with title \\\"Claude Code\\\" subtitle \\\"アクションが必要です\\\"\"; } 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/andoukiyoshiya/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "design@synced": false,
+    "cowork-plugin-management@synced": false
+  },
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
+}

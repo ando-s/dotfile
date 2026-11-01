@@ -66,6 +66,25 @@ if [ -f "$claude_md_src" ]; then
   fi
 fi
 
+echo "==> Installing settings.json"
+settings_src="$DOTFILE_DIR/claude/settings.json"
+settings_target="$CLAUDE_DIR/settings.json"
+if [ -f "$settings_src" ]; then
+  if [ -L "$settings_target" ]; then
+    current=$(readlink "$settings_target")
+    if [ "$current" = "$settings_src" ]; then
+      echo "  [ok] settings.json (already linked)"
+    else
+      echo "  [WARN] settings.json -> $current (different target, leaving alone)"
+    fi
+  elif [ -e "$settings_target" ]; then
+    echo "  [WARN] settings.json exists as non-symlink, leaving alone"
+  else
+    ln -s "$settings_src" "$settings_target"
+    echo "  [link] settings.json"
+  fi
+fi
+
 echo "==> Installing .tmux.conf"
 tmux_src="$DOTFILE_DIR/tmux/.tmux.conf"
 tmux_target="$HOME/.tmux.conf"

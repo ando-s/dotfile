@@ -8,6 +8,7 @@
 dotfile/
 ├── claude/
 │   ├── CLAUDE.md     # ~/.claude/CLAUDE.md に symlink（個人グローバル設定）
+│   ├── settings.json # ~/.claude/settings.json に symlink（フック・権限・環境変数）
 │   ├── skills/       # ~/.claude/skills/ に symlink される
 │   ├── agents/       # ~/.claude/agents/ に symlink される
 │   ├── docs/         # ワークフロー説明（人間向け）
@@ -30,6 +31,7 @@ Claude Code 起動中の場合は **再起動**（agent / skill list は起動�
 ### 個人グローバル設定
 
 - `claude/CLAUDE.md` — 全プロジェクト共通の個人的好み（コミュニケーションスタイル・開発方針）
+- `claude/settings.json` — Claude Code のユーザー設定（毎回のメッセージに日本語で返答する指示を添えるフック、通知、権限など）
 
 ### AI-TDD ワークフロー
 
