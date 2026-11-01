@@ -3,13 +3,39 @@
 このリポジトリの作業に使う決めごと。プロファイルに関係なく、`~/dev/spica/web-application`
 （と comicdev 上の同リポジトリ）を触るときに読む。
 
-**web-application のコード変更・テスト実行は、ssh 先の comicdev で行う。ローカルでは行わない。**
+**web-application のコード変更・テスト実行は comicdev で行う。ローカルでは行わない。**
+**ローカルのセッションから ssh でコマンドを流すのではなく、comicdev で claude を起動して作業させる。**
 
 - repo: `/home/ec2-user/web-application`
 - そこに worktree を作り、worktree 内で編集・テスト実行する
 - ローカルの `/Users/s-ando/dev/spica/web-application` はセッションの cwd として起動するだけ。ここでファイルを編集しない。ローカルに worktree も作らない
 
 ドキュメントだけの変更、読むだけの MR レビューも同じ扱いにする。変更の規模や種類で置き場所を変えない。
+
+## 作業のはじめ方
+
+Herdr のペインを分割して comicdev に入り、そこで claude を起動してタスクを渡す。
+
+comicdev で起動した claude は、comicdev の `~/.claude/CLAUDE.md` と worktree 配下の `CLAUDE.md`・
+`.claude/rules/` を読む。ローカルから ssh でコマンドを流す形ではこれらが読まれず、リポジトリの
+決めごとが効かないまま作業することになる。
+
+ペイン操作の細部は記憶 `herdr-pane-claude-agent-workflow` に従う。
+
+1. `test "${HERDR_ENV:-}" = 1` を確認する。Herdr の外なら、この手順は使えないとユーザーに伝えて止める
+2. `herdr pane split --current --direction right --no-focus` で兄弟ペインを作り、
+   応答の `result.pane.pane_id` を控える（レイアウトが縦長なら `--direction down`）
+3. `herdr pane rename <id> "comicdev"` でラベルを付ける
+4. `herdr pane run <id> "ssh comicdev"` で入る。ssh_config の `RemoteCommand` が
+   `/home/ec2-user/web-application` へ移動する
+5. worktree で作業するときは `herdr pane run <id> "cd <worktree のパス>"` で移ってから起動する
+6. `herdr pane run <id> "claude"` で対話 TUI を開き、
+   `herdr wait agent-status <id> --status idle --timeout 60000` を待つ
+7. `herdr pane run <id> "<タスク文>"` でタスクを渡す。完了を待ってから
+   `herdr pane read <id> --source recent-unwrapped --lines 120` で結果を読む
+
+タスク文には作業対象のブランチ・MR 番号・成果物の置き場所を書く。ローカルの会話でしか出ていない
+前提は、向こうの claude には伝わらない。
 
 ## 動作確認
 
@@ -22,6 +48,9 @@
 ステージング・本番のデータ確認は Metabase を使う。ssh は要らない。
 
 ## ssh コマンドの叩き方
+
+ローカルから直接 ssh を叩くのは、ペインを立てる前の下調べ（worktree の一覧、ブランチの有無、
+`sync-comicdev.sh` の取り込み）に限る。編集・テスト実行・画面確認は comicdev のペインの claude に渡す。
 
 `comicdev` は ssh_config に `RemoteCommand`（`cd /home/ec2-user/web-application && exec $SHELL -l`）が設定されている。
 そのため `ssh comicdev "コマンド"` は `Cannot execute command-line and remote command.` で失敗する。
