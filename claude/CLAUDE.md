@@ -33,6 +33,7 @@
 - Metabase の実 DB は `mcp__metabase__` を使う。`mcp__metabase-read__` は同じ ID でもステージングに繋がる。どちらも Metabase 上の質問・ダッシュボードの作成と更新ができ、DB のデータは変更できない。
 - GitLab は `glab`。社内の GitLab（gitlab.wwwave.info）なので、`-R gitlab.wwwave.info/comic-festa-group/web-application` のようにホストから書く。`glab api` には `--hostname gitlab.wwwave.info` を付ける（付けないと gitlab.com に問い合わせて 404 か空の結果になる）。JIRA は `jira` CLI。
 - Obsidian の vault `armond` は `~/Documents/obsidian/armond/`。`obsidian://open?vault=armond&file=<パス>` のノートは、その下の `<パス>.md` を直接読み書きする。
+  - ノートに書き込むときは、整理してまとめる場合も内容を削らない。絵文字（状態を示す色の丸など）を使わない。
 - URL の中身が取れないときは、手段を次々に試さず、ユーザーに内容の貼り付けを依頼する。
 
 ## Googleドキュメント・スプレッドシートを作るとき
