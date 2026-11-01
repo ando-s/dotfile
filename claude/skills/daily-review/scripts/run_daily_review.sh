@@ -26,10 +26,11 @@ LOG_FILE="$LOG_DIR/run_$(date +%Y%m%d).log"
   # 任意のプロジェクトディレクトリで実行（cwd は分析対象に影響しない。スクリプトが全プロジェクト横断する）
   cd "$HOME" || exit 1
 
-  # headless 実行。無人実行なので承認プロンプトで止まらないよう権限スキップ。
-  # スキル内の操作は python3 / mkdir / Write(レポート) のみで、破壊的操作は含まない。
+  # headless 実行。会話履歴に紛れた外部テキストの命令で任意のコマンドが走らないよう、
+  # 許可するツールを SKILL.md の allowed-tools と同じものに絞る。許可外の操作は拒否される。
   claude -p "/daily-review を実行してレポートを生成して" \
-    --dangerously-skip-permissions \
+    --allowedTools "Read" "Edit(~/.claude/daily-review/**)" \
+      "Bash(python3:*)" "Bash(mkdir:*)" "Bash(date:*)" "Bash(echo:*)" \
     2>&1
 
   echo "===== daily-review 終了: $(date '+%Y-%m-%d %H:%M:%S') ====="
