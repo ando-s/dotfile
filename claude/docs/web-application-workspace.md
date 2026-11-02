@@ -156,6 +156,7 @@ OAuthのMCP（Datadog・Todoistなど）は、許可した後に`http://localhos
 
 ## Herdrの設定
 
+- 手元のHerdr UIには、comicdevを保存済みSSHマシン（ラベル`comicdev`、`herdr machine add --label comicdev comicdev-herdr`）として登録してある。サイドバーのcomicdevの下にworkspaceを作れる。キー割り当てはEC2側を使うよう`config-gpui.local.toml`の`[devices.<ID>]`に`keybindings = "server"`を入れてある
 - comicdevへは`herdr --remote comicdev-herdr --remote-keybindings server`で繋ぐ。この接続では`[keys]`と`[[keys.command]]`もEC2側の`config.toml`から読まれ、手元の`[keys]`は使われない
 - キー割り当ての正本は手元の`config.toml`の`[keys]`以下。`~/.local/bin/herdr-sync-keys`でEC2側へ写してreload-configする。EC2側の`[keys]`は直接編集しない
 - `[terminal]`・`[ui]`・`[theme]`・`[experimental]`はサーバー側（EC2）が読む
