@@ -87,6 +87,7 @@ ssh が失敗したら、原因を解消して ssh で再実行する。ロー�
 - 作成は comicdev 上の `git worktree` コマンドで行う。**`EnterWorktree` ツールは使わない**（ローカルにしか作れないため）。
   `claude/CLAUDE.md` の「ワークツリー作成は EnterWorktree ツールを使う」は、web-application ではこの文書が優先する
 - ブランチ命名・配置・Docker セットアップ手順は repo 側の `packs/nuts/docs/implementation/git-worktree.md` に従う
+- `git worktree remove --force`がdockerの作ったroot所有のファイルで`Permission denied`になっても、gitの登録は外れ、ブランチのロックも解ける。残るのはディスク上のファイルだけ。`git worktree list`と`ls -d <パス>`の両方を見て、「登録は外れた／ファイルは残っている」を分けて報告する。ファイルは`sudo rm -rf <パス>`をユーザーに頼む
 
 ## 画面への到達
 
@@ -112,6 +113,7 @@ curl -s -H "Host: sa2.comicdev.iowl.jp" -b "festa_auth_dev=<users.auth_token>" \
   - `APP_HOST_NAME`は公開ホスト名にし、webだけでなくwebpackのサービスにも渡す。webpackの3035番もホストへ公開する。画面のJSの取得先がこの値で決まり、localhostのままでは画面のJSが動かない
   - `.env`は読み書きが許可されていないので、これらは`docker-compose.override.yml`のenvironmentで上書きする
 - 入会と都度課金の確認ページは申込の前提（コースの指定やセッション）が要る。前提が無いと 302 で入口へ戻る
+- comicdevのヘッドレスブラウザから、公開ホスト名の開発環境と、e-SCOTTのテスト環境（`https://www.test.e-scott.jp`）の両方に届く。カードのE2Eのブラウザ操作は、Claudeが実行できる前提で計画する
 
 ## 開発環境のデータ
 
@@ -123,6 +125,30 @@ docker run --rm -v <primary>_dbdatastore:/from -v <worktree>_dbdatastore:/to alp
 ```
 
 このコマンドの `cp -a` の引数は、元の記録に無かったものを補った形で、動かしては確かめていない。初めて使うときは、コピー先のボリュームの中身を確かめる。
+
+## comicdevの停止と再開
+
+comicdevはAWSの予定で毎日20:00に止まり、9:00に起動する。止まるとHerdrのサーバーごと終わり、ペインのエージェントとバックグラウンドの処理も終わる。
+
+- 19:55にcronで`herdr server stop`を流し、タブの状態を保存してから止まるようにしている。ログは`~/herdr-logs/server-stop.log`
+- 30分以上かかる並列のレビュー・E2E・バッチは、20:00をまたがないように始める。またぐなら、結果をファイルに書くよう最初に指示する
+- 朝にHerdrへ繋いだら`herdr-restore`を1回打つ。`~/.claude/herdr-sessions/`に残ったセッションを、タブ名ごとに開き直す
+- 途中のセッションは、そのワークツリーで`claude --resume <セッションID>`を起動すると続きから再開できる
+
+## comicdevでのMCPの認証
+
+OAuthのMCP（Datadog・Todoistなど）は、許可した後に`http://localhost:<ポート>/callback?...`へ戻ろうとし、ローカルのブラウザでは接続できない画面になる。
+
+- 接続できない画面のアドレス欄のURLを丸ごとClaudeに貼り、認証を終える
+- 古い認証URLで出たcallbackは使えない。毎回出し直したURLで許可する
+- DatadogのMCPは、組織の設定で書き込みが無効。読み取りだけ
+
+## 解説資料（explainer）
+
+- 置き場所は`~/explainer-docs/<資料名>/`（web-applicationの外）。Node 24はnvmの`~/.nvm/versions/node/v24.21.0/bin`をPATHに足す。検証は`~/explainer-docs`で`verify-doc.mjs`を流す
+- 抜粋の照合元は、ワークツリーでなくコミットから`git archive`で取り出したものに固定する。ワークツリーを消すと検証が壊れる
+- 本文のファイル・仕様書・チケットは、コミットを固定したGitLabのURLと行番号、JIRAへのリンクにする
+- 資料はJIRAに貼ってチームが読む前提で書く。想定読者に個人名を書かない
 
 ## Herdrの設定
 
@@ -139,7 +165,7 @@ docker run --rm -v <primary>_dbdatastore:/from -v <worktree>_dbdatastore:/to alp
 - 開き直したら`herdr pane list --workspace <ws>`で作業ディレクトリがワークツリーになっているか確かめる
 - コメントは送る前に閉じると消える
 
-## comicdev 側の Claude の記憶
+## comicdev 側の Claude の設定
 
-comicdev で動かしたセッションの記憶はローカルのセッションからは読まれない。
-`claude/sync-comicdev.sh` で取り込む。整理は `claude/README-claude-config.md`
+comicdev の `~/.claude/CLAUDE.md` はローカルとは別に持ち、自動メモリはオフにしている。
+ローカルとの差分は `claude/sync-comicdev.sh` で確かめる。置き場所の分け方は `claude/README-claude-config.md`

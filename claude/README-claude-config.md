@@ -8,12 +8,13 @@
 - comicdev で起動したセッション: comicdev 側の設定だけ
 
 ssh でコマンドを流しても、リモートの `~/.claude/CLAUDE.md` や記憶は読まれない。
-web-application の作業はコードが comicdev にあるため、記憶が comicdev 側にだけ溜まる。
+web-application の作業はコードが comicdev にあるため、comicdev の設定はローカルとは別に持つ。
 
 ## 揃え方
 
-`claude/sync-comicdev.sh` で comicdev の `CLAUDE.md` と記憶を取り込む。
-取得したものは `claude/_remote-comicdev/` に置き、プロジェクトの記憶へ同名でないものだけ足す。
+ローカルと comicdev のどちらも自動メモリをオフにしている。覚えておくことは、下の置き場所の規則ファイルに書く。
+
+`claude/sync-comicdev.sh` で comicdev の `CLAUDE.md` を `claude/_remote-comicdev/` に取り込み、ローカルとの差分を見る。
 
 ## 作業場所で内容を分ける
 
