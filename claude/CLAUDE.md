@@ -49,6 +49,7 @@
   - ノートに書き込むときは、整理してまとめる場合も内容を削らない。絵文字（状態を示す色の丸など）を使わない。
   - armond は私用の vault で同期される。社内の情報（資料の中身、社内の人の発言、数値）を書かない。
   - 仕事のノート（社外に出せないもの、出せるか迷うもの）は、同期しないvault`work`（`~/Documents/obsidian/work/`）に置く。半年以上更新のないものは同期しないvault`archive`にある。
+- archifyで作った図は、finalizeの後にHTMLをArtifactで非公開のまま公開し、リンクを渡す。作業はscratchpadで絶対パスを使い、ブラウザはPlaywright付属のChromiumを使う。公開したページではExportのボタンが動かない。
 - Playwright MCPが「Browser ... is not installed」で失敗したら、`npx @playwright/mcp@latest install-browser chrome-for-testing`を実行してから呼び直す。MCPが求めるブラウザのビルドは、MCPの更新で上がる。
 - 社内向けのHTML資料は、Apps Scriptの共有アプリで共有できる。HTMLはそのアプリの画面からアップロードしたものだけが`exec?id=<ID>`で開け、ドライブに置いたファイルのIDでは開けない。ClaudeはHTMLの置き場所とアップロードの手順を渡し、共有のURLを自分で組み立てない。
 

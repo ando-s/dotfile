@@ -60,6 +60,10 @@ herdrの構文は版で変わるので、`herdr --help`と`herdr --skill`の出�
 
 ステージング・本番のデータ確認は Metabase を使う。ssh は要らない。
 
+本体の開発環境（`https://sa2.comicdev.iowl.jp/`）は`bash ~/denebola/launch_denebola.sh`で起動する。画面（Next.js）は`~/denebola`、APIは`~/web-application`にある。
+
+- 起動直後の最初のリクエストはNext.jsの初回のコンパイルで30秒以上かかり、タイムアウトすることがある。2回目で通る
+
 ## ssh コマンドの叩き方
 
 ローカルから直接 ssh を叩くのは、ペインを立てる前の下調べ（worktree の一覧、ブランチの有無、
@@ -158,6 +162,7 @@ OAuthのMCP（Datadog・Todoistなど）は、許可した後に`http://localhos
 - 誤ったテーブルに書いた項目は警告なしで捨てられ、`herdr server reload-config`は成功を返す。書く前に`herdr --default-config`で項目の属するテーブルを確かめ、反映は挙動で確かめる
 - `herdr agent focus`の対象はタブ名では通らない。`herdr agent rename <ペインID> <名前>`で名前を付けてから指定する
 - `herdr update`はherdrの外で実行する（セッション内では拒否される）
+- comicdevのHerdrの通知は、`[ui.toast] delivery = "terminal"`でMacの端末へOSC 9/777として送り、端末がデスクトップ通知にする。裏のタブのClaudeが完了か入力待ちになったときに出る。sshなら届き、moshでは届かない。Slackなどのwebhookには送らない
 
 ## reviewr
 
