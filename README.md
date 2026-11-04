@@ -14,6 +14,7 @@ dotfile/
 │   │       └── CLAUDE.md  # ~/.config/claude/profiles/ando/CLAUDE.md に symlink（starbase 向け）
 │   ├── skills/       # ~/.claude/skills/ に symlink される
 │   ├── agents/       # ~/.claude/agents/ に symlink される
+│   ├── hooks/        # ~/.claude/hooks/ に symlink される
 │   ├── docs/         # ワークフロー説明（人間向け）
 │   └── templates/    # プロジェクトにコピーして使う雛形（install.sh では入れない）
 ├── tmux/

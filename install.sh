@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Claude Code skills/agents to personal scope (~/.claude/)
+# Install Claude Code skills/agents/hooks to personal scope (~/.claude/)
 # profile ando (starbase) の CLAUDE.md は ~/.config/claude/profiles/ando/ に link する
 # Idempotent: safe to run multiple times. Existing files are not overwritten.
 
@@ -44,6 +44,26 @@ for agent in "$DOTFILE_DIR/claude/agents/"*.md; do
     echo "  [WARN] $name exists as non-symlink, leaving alone"
   else
     ln -s "$agent" "$target"
+    echo "  [link] $name"
+  fi
+done
+
+echo "==> Installing hooks"
+mkdir -p "$CLAUDE_DIR/hooks"
+for hook in "$DOTFILE_DIR/claude/hooks/"*; do
+  name=$(basename "$hook")
+  target="$CLAUDE_DIR/hooks/$name"
+  if [ -L "$target" ]; then
+    current=$(readlink "$target")
+    if [ "$current" = "$hook" ]; then
+      echo "  [ok] $name (already linked)"
+    else
+      echo "  [WARN] $name -> $current (different target, leaving alone)"
+    fi
+  elif [ -e "$target" ]; then
+    echo "  [WARN] $name exists as non-symlink, leaving alone"
+  else
+    ln -s "$hook" "$target"
     echo "  [link] $name"
   fi
 done
