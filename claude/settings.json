@@ -21,6 +21,14 @@
             "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"返答は必ず日本語で書く。ツールの結果が英語でも、作業の途中にメッセージが届いたあとも英語に切り替えない。コード・コマンド・固有名詞はそのままでよい。\"}}'"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/herdr-workspace-label.py\""
+          }
+        ]
       }
     ],
     "Notification": [
