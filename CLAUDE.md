@@ -13,18 +13,6 @@ symlink されるファイル一式だけである。リポジトリ内の地の
 
 ## リポジトリ構成
 
-```
-dotfile/
-├── claude/
-│   ├── CLAUDE.md      # ~/.claude/CLAUDE.md に symlink — 個人グローバル設定。このマシンの全プロジェクトに適用される
-│   ├── skills/<name>/SKILL.md   # ディレクトリごと ~/.claude/skills/<name> に symlink
-│   ├── agents/<name>.md         # ~/.claude/agents/<name>.md に symlink
-│   ├── docs/          # 人間向けワークフロー説明（どこにもインストールされない）
-│   └── templates/     # プロジェクトにコピーして使う雛形（どこにもインストールされない）
-├── tmux/.tmux.conf    # ~/.tmux.conf に symlink
-└── install.sh         # idempotent な symlink セットアップ
-```
-
 **`claude/CLAUDE.md` とこのファイルを混同しないこと。** このファイル
 （リポジトリ直下の `/CLAUDE.md`）は、dotfile リポジトリ自体で作業する
 Claude Code セッションのために*このリポジトリ*を説明するものである。
@@ -39,13 +27,6 @@ Claude Code セッションのために*このリポジトリ*を説明するも
 ```bash
 bash install.sh
 ```
-
-idempotent。`claude/skills/*/`・`claude/agents/*.md`・`claude/CLAUDE.md`・
-`tmux/.tmux.conf` をそれぞれ `~/.claude/` / `~/.tmux.conf` に symlink する。
-既存の非 symlink ファイルや、別のリンク先を指す symlink は上書きせず、
-`[WARN]` を出してそのままにする。
-
-lint / test / build コマンドは存在しない。CI もない。
 
 **skill・agent を追加/変更した後は、Claude Code セッションの再起動が必要**。
 skill/agent 一覧はセッション起動時に固定されるため、`install.sh` を再実行
@@ -63,14 +44,6 @@ symlink なので実体を触ってもリポジトリの作業ツリーが変わ
 ローカル生成物（weekly-rules の材料と案。これらはこのリポジトリの外、
 `~/.claude/weekly-rules/` 配下に置かれる）が紛れ込んでいないか確認
 すること。
-
-## skill と agent の違い
-
-- **skill**（`claude/skills/<name>/SKILL.md`）: ユーザー起動またはトリガー
-  起動のエントリポイント（`/name`）。メインの会話コンテキストで動く。
-- **agent**（`claude/agents/<name>.md`）: `Task` ツールから呼ばれる
-  サブエージェント定義。隔離コンテキストで動く。YAML frontmatter
-  （`name`・`description`・`model`・`tools`）で権限範囲を絞る。
 
 ## このリポジトリが実装している主要ワークフロー
 
