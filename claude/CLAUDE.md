@@ -4,6 +4,7 @@
 
 - マージリクエスト（MR）のレビュー依頼、ワークツリー作成依頼を受けた場合、セッション名は `Codereview MR !<MRのID>` というフォーマットで 名前をつける。
 - **MRレビューは必ずワークツリーを切ってから行う。** 本体repo（master）で `git checkout` してブランチに切り替えない。本体repoを汚さず、 ブランチのコードに対して rspec/rubocop を実行できるようにするため。 読むだけでもワークツリー内で作業する。
+- MRレビューでは、最初にMRのhead SHAのパイプラインを確かめる。成功していれば、ローカルのrspec・rubocop・packwerkは回さずに差分を読む。回すのは、CIが失敗か未実行のときか、追加の検証が要るときだけ。
 - **ワークツリー作成は EnterWorktree ツールを使う。** 手動の `git worktree` コマンドにフォールバックしない。ツールが失敗した場合は原因（ブランチ未fetch等）を解消して再実行する。
   - 例外: web-application は comicdev で作業する。Herdr のペインを分割して ssh で入り、そこで claude を起動してタスクを渡す。ローカルから ssh でコマンドを流す形にしない。worktree も comicdev 上で `git worktree` コマンドで作る。手順・ssh の叩き方・画面への到達は `~/dev/dotfile/claude/docs/web-application-workspace.md`。
 
@@ -14,6 +15,7 @@
 - 仕事のリポジトリでは、コミット前に`git config user.email`が`s-ando@wwwave.jp`か確かめ、違えばそのリポジトリのローカル設定に入れる。グローバルの設定は個人のアカウントになっている。push済みのコミットのauthorは直さない。
 - force-pushはClaudeが実行しない。履歴の置き換えが要るときは内容を用意し、`git push --force-with-lease`のコマンドをユーザーに渡す。
 - **MRに `Request Code Review(Nuts)` などレビュー依頼ラベルを勝手に 付けない。** MR作成は「ブランチ・コミット・push・MR作成（タイトル/説明）」までに留める。レビュー依頼ラベルの付与はレビューを回す合図であり、ユーザーが手動で行う（明示依頼があった場合のみ付ける）。
+- E2Eの進め方（`packs/nuts/.ai/skills/e2e-*`や運用の規約）はMRで変えない。気づきはE2Eのスプレッドシートの改善メモに書き、チームで相談してユーザーが指示してから反映する。実装の不具合を直すMRは対象外。
 - MRの説明やチケットの本文を丸ごと置き換えるコマンドには、`test -s <ファイル> &&`を前に付ける。scratchpadのファイルは長いセッションの途中で消えることがあり、空のまま本文を上書きしうる。
 
 ## MRレビューコメントへの対応
@@ -22,6 +24,8 @@
 - **メンションは MR運用ルールに従う。** 返信には元コメント著者へのメンションを付ける。ルールの全文は `packs/nuts/docs/implementation/MR運用ルール.md`
 - **resolve はしない。** スレッドの解決はユーザーが手動で行う。
 - **依頼されていないコメントは投稿しない。** 投稿するのは、指摘対応・返信・レビュー指摘をユーザーから依頼された分だけ。
+- 「なるほどポイント」（読んで腑に落ちた点を`[comment]`で残すもの）はユーザーが自分で書く。Claudeは作らず、候補も出さない。ユーザーが内容を示したときだけ下書きにする。
+- MRのラベル（Commentedなど）をレビューの状況の根拠にしない。レビュー済みかはスレッドとレビューの記録で判断する。
 
 ## Nuts の資料の場所
 
@@ -37,7 +41,7 @@
   - コネクタでできないこと: 既存ファイルの中身の丸ごと差し替え（ドライブの更新は題名・置き場所などだけ）、Google Chat の読み書き。
 - Metabase の実 DB は `mcp__metabase__` を使う。`mcp__metabase-read__` は同じ ID でもステージングに繋がる。どちらも Metabase 上の質問・ダッシュボードの作成と更新ができ、DB のデータは変更できない。
   - ネイティブSQLの質問は、`create_question`・`update_question`の`query`にクエリのJSONをbase64にして渡すと保存できる。`database`にはDB名でなく数値のIDを渡す（DB名だと権限のエラーに見える失敗になる）。
-- GitLab は `glab`。社内の GitLab（gitlab.wwwave.info）なので、`-R gitlab.wwwave.info/comic-festa-group/web-application` のようにホストから書く。`glab api` には `--hostname gitlab.wwwave.info` を付ける（付けないと gitlab.com に問い合わせて 404 か空の結果になる）。JIRA は `jira` CLI。
+- GitLab は `glab`。社内の GitLab（gitlab.wwwave.info）なので、`-R gitlab.wwwave.info/comic-festa-group/web-application` のようにホストから書く。`glab api` には `--hostname gitlab.wwwave.info` を付ける（付けないと gitlab.com に問い合わせて 404 か空の結果になる）。JIRA は参照と一括操作を`acli`、作成と編集をAtlassianのMCPで行う（`packs/nuts/.ai/references/guides/jira.md`）。どちらでもできない操作はRESTを自分で叩く。トークンは環境変数`JIRA_API_TOKEN`、メールアドレスは`~/.config/.jira/.config.yml`の`login`から、スクリプトの中で読む。埋め字入りのコマンドをユーザーに渡さない。
   - MRは`glab mr create`で本人の名義で作る。`scripts/gitlab/create_mr.sh`は共有アカウントの名義になるので、MRの作成に使わない。
   - `glab mr create`・`list`・`update`には`-R`に加えて`-H`（head repository）にも同じリポジトリを渡す。無いとリポジトリを選ぶ対話の画面で止まる。
   - MRの説明文はscratchpadのmdに書き、それを変数に読み込んで`glab mr create`に渡すshスクリプトを`bash`で実行する。
@@ -69,6 +73,7 @@
 - JIRA チケット・GitLab コメント・Chat メッセージ・メールの作成・更新・削除は、最終内容を全文示して「この内容で作成していいですか」と聞き、明確な承認を得てから実行する。
 - 自分が作っていない Google ドキュメント・スプレッドシート・スライド（議事録など他の人も書く文書）への書き込みも同じ扱いにする。書く内容はチャットで渡し、貼り付けはユーザーが行う。
 - 下書きへの「良さそう」「いいね」は内容への同意で、実行の承認ではない。
+- alert-responseの返信は、自分宛てのDMの下書きにせず、`#nuts_notify`の通知のスレッドに投稿する。投稿の前に全文を示して承認を得る。
 - 複数件をまとめて作る操作は、テンプレートと1件目の文面を先に合意する。
 - 書き込む先の文書・ファイルの候補が複数ありそうなときは、書く前に文書名とリンクを示して確かめる。
 - チケットの作成を提案するときは、本文に加えて作成先のプロジェクト・課題の種類・親・担当者・期限を表で示して確かめる。本文の承認だけでは作成先が決まらない。

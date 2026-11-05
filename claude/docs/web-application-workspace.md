@@ -139,6 +139,12 @@ comicdevはAWSの予定で毎日20:00に止まり、9:00に起動する。止ま
 - 朝にHerdrへ繋いだら`herdr-restore`を1回打つ。`~/.claude/herdr-sessions/`に残ったセッションを、タブ名ごとに開き直す
 - 途中のセッションは、そのワークツリーで`claude --resume <セッションID>`を起動すると続きから再開できる
 
+## comicdevの定期実行
+
+- レビューの学びを集める処理は、comicdevのcron（月曜01:00 UTC）が`~/bin/run-review-learnings.sh`で`claude -p "/extract-review-comment-learnings ..."`を流す。ログは`~/review-learnings-logs/`。正本はGitLabの`s-ando/nuts-review-learnings-scheduler`（ローカルは`~/dev/spica/nuts-review-learnings-scheduler`）
+- crontabの登録とcomicdevでのclaudeの起動は、auto modeが拒否するのでユーザーが打つ
+- comicdevを使う理由: SlackのリマインダーはSlackbotの送信で許可の一覧に掛からない。GASからstarbaseを直接呼ぶ形は、鍵1本で手元のClaudeを操作できてしまう。GASからgitlab.wwwave.infoへはnginxの403で届かない
+
 ## comicdevでのMCPの認証
 
 OAuthのMCP（Datadog・Todoistなど）は、許可した後に`http://localhost:<ポート>/callback?...`へ戻ろうとし、ローカルのブラウザでは接続できない画面になる。
