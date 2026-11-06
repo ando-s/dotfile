@@ -3,7 +3,8 @@
 
 名前は「<目的>｜完了:<完了の基準>」の形にする。
 
-- 目的: セッションで最初に決めたものを保存し、以後は変えない。途中で作業が移っても名前の目的は動かさない
+- 目的: 最初の3件の依頼のあいだは、補足や言い直しを入れて作り直す。その後は保存したものを変えず、途中で作業が移っても名前の目的は動かさない
+  - ワークスペースの名前が前回このフックが付けたものから変わっていれば、手で付け直したものとみなし、その目的を以後も使う
   - MR レビューの依頼があれば、最も古い依頼から "Codereview MR !<id>" を使う
   - JIRA のチケットに取り組む依頼があれば、最も古い依頼の課題キーで題名を acli から取り、Haiku が題名を縮めて目的にする
     - 課題キーと題名は保存し、ステータスラインに出す。課題キーだけでは何の作業か分からないため、名前には入れない
@@ -21,6 +22,7 @@ Stop で動かし、会話記録で今の会話に残っている依頼だけを
 会話記録の読み取りと名前の生成は数秒かかるため、切り離した子プロセスで行う。
 子プロセスが重なったときは、最後に始めたものだけが名前を付ける。
 """
+import glob
 import hashlib
 import json
 import os
@@ -30,6 +32,7 @@ import sys
 
 STATE_DIR = os.path.expanduser("~/.claude/herdr-sessions/labels")
 MIN_PROMPT_CHARS = 8
+PURPOSE_SETTLE_PROMPTS = 3
 MAX_PART_CHARS = 18
 RECENT_PROMPTS = 3
 PROMPT_EXCERPT_CHARS = 600
@@ -40,7 +43,9 @@ LABEL_PROMPT = (
     "目的: <作業の目的。日本語の15文字以内の名詞句>\n"
     "完了: <何ができたら終わりか。日本語の15文字以内。例「MRを作成」「原因を特定」「方針を合意」>\n"
     "目的が既に決まっているときは、目的の行もそのまま出力し、完了の基準はその目的に対して書く。\n"
-    "目的が決まっていないときは、最初の依頼から目的を決める。直近の依頼は完了の基準を絞るためだけに使う。\n"
+    "目的が決まっていないときは、最初の依頼から目的を決める。目的には、依頼が何を得たいか・何をしたいかを書き、"
+    "依頼に出てくる語を組み替えて別の意味にしない。直近の依頼が最初の依頼の補足や言い直しなら目的に入れ、"
+    "別の作業なら完了の基準を絞るためだけに使う。\n"
     "チケットの題名があれば、目的はその題名を15文字以内に縮めたものにする。\n\n"
 )
 INTERRUPTED = "[Request interrupted by user]"
@@ -131,6 +136,19 @@ def read_state(session_id):
         return {}
 
 
+def set_by_hook(label):
+    """どのセッションかがこのフックで付けた名前、または付けようとしている名前なら True。"""
+    for path in glob.glob(os.path.join(STATE_DIR, "*.txt")):
+        try:
+            with open(path) as f:
+                state = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(state, dict) and label in (state.get("label"), state.get("pending_label")):
+            return True
+    return False
+
+
 def write_state(session_id, **state):
     os.makedirs(STATE_DIR, exist_ok=True)
     tmp = state_path(session_id) + f".{os.getpid()}"
@@ -139,11 +157,17 @@ def write_state(session_id, **state):
     os.replace(tmp, state_path(session_id))
 
 
-def apply_label(pane_id, label, previous_label=None):
+def current_workspace(pane_id):
     pane = (herdr("pane", "get", pane_id) or {}).get("pane")
     if not pane:
+        return None, None
+    return pane, (herdr("workspace", "get", pane["workspace_id"]) or {}).get("workspace")
+
+
+def apply_label(pane_id, label, previous_label=None):
+    pane, workspace = current_workspace(pane_id)
+    if not pane:
         return
-    workspace = (herdr("workspace", "get", pane["workspace_id"]) or {}).get("workspace")
     if not workspace or workspace.get("label") == label:
         return
 
@@ -214,11 +238,12 @@ def excerpt(prompt):
     return prompt.strip()[:PROMPT_EXCERPT_CHARS]
 
 
+def candidate_prompts(prompts):
+    return [p for p in prompts if not p.lstrip().startswith("/") and len(p.strip()) >= MIN_PROMPT_CHARS]
+
+
 def build_request(prompts, purpose, ticket=None):
-    candidates = [
-        p for p in prompts
-        if not p.lstrip().startswith("/") and len(p.strip()) >= MIN_PROMPT_CHARS
-    ]
+    candidates = candidate_prompts(prompts)
     if not candidates:
         return None
     first, recent = candidates[0], candidates[1:][-RECENT_PROMPTS:]
@@ -270,17 +295,27 @@ def run_label(session_id, pane_id, transcript_path):
         return
     state = read_state(session_id)
     previous_label = state.get("label")
-    fixed = state.get("purpose")
+    locked = bool(state.get("locked"))
+    _, workspace = current_workspace(pane_id)
+    shown = (workspace or {}).get("label")
+    if previous_label and shown and not set_by_hook(shown):
+        # 手で付け直した名前の目的を、以後も使う
+        state["purpose"] = shown.split(SEPARATOR)[0].strip()
+        previous_label, locked = shown, True
+    settled = locked or len(candidate_prompts(prompts)) > PURPOSE_SETTLE_PROMPTS
+    fixed = state.get("purpose") if settled else None
     ticket = state.get("ticket")
     if not ticket or not ticket.get("summary"):
         # 課題キーだけを目的にしていた名前も、題名を取って付け直す
-        found = first_found(ticket_key, prompts) or (fixed if fixed and TICKET_KEY_ONLY.fullmatch(fixed) else None)
+        stored = state.get("purpose")
+        found = first_found(ticket_key, prompts) or (stored if stored and TICKET_KEY_ONLY.fullmatch(stored) else None)
         ticket = fetch_ticket(found) if found else None
     if ticket and fixed == ticket["key"]:
         fixed = None
     fixed = fixed or first_found(review_label, prompts)
     token = f"{os.getpid()}-{key}"
-    write_state(session_id, key=key, token=token, label=previous_label, purpose=fixed, ticket=ticket)
+    write_state(session_id, key=key, token=token, label=previous_label,
+                purpose=state.get("purpose"), ticket=ticket, locked=locked)
 
     request = build_request(prompts, fixed, ticket)
     generated, done = generate_parts(request) if request else (None, None)
@@ -291,8 +326,10 @@ def run_label(session_id, pane_id, transcript_path):
 
     if read_state(session_id).get("token") != token:
         return
+    write_state(session_id, key=key, token=token, label=previous_label, pending_label=label,
+                purpose=state.get("purpose"), ticket=ticket, locked=locked)
     apply_label(pane_id, label, previous_label)
-    write_state(session_id, key=key, token=token, label=label, purpose=purpose, ticket=ticket)
+    write_state(session_id, key=key, token=token, label=label, purpose=purpose, ticket=ticket, locked=locked)
 
 
 def main():
