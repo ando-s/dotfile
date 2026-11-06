@@ -14,7 +14,8 @@ Haiku が失敗したときは、ルールの名前があればそれだけを�
 Stop で動かし、会話記録で今の会話に残っている依頼だけを見る。送信を取り消した依頼は Stop を起こさず、
 会話記録では別の枝に残る。応答の途中で止めた依頼は、直後に中断の記録が入る。どちらも名前の元にしない。
 
-今のワークスペースにこのペインしか無ければ名前を変え、ほかのペインもあればこのペインを新しいワークスペースに移す。
+今のワークスペースにこのペインしか無いか、前回このセッションが付けた名前のままなら名前を変える。
+それ以外でほかのペインもあれば、このペインを新しいワークスペースに移す。
 既に同じ名前のワークスペースにいれば何もしない。失敗しても応答は止めない。
 会話記録の読み取りと名前の生成は数秒かかるため、切り離した子プロセスで行う。
 子プロセスが重なったときは、最後に始めたものだけが名前を付ける。
@@ -113,7 +114,7 @@ def write_state(session_id, **state):
     os.replace(tmp, state_path(session_id))
 
 
-def apply_label(pane_id, label):
+def apply_label(pane_id, label, previous_label=None):
     pane = (herdr("pane", "get", pane_id) or {}).get("pane")
     if not pane:
         return
@@ -121,7 +122,7 @@ def apply_label(pane_id, label):
     if not workspace or workspace.get("label") == label:
         return
 
-    if workspace.get("pane_count") == 1:
+    if workspace.get("pane_count") == 1 or (previous_label and workspace.get("label") == previous_label):
         herdr("workspace", "rename", pane["workspace_id"], label)
     else:
         herdr("pane", "move", pane["pane_id"], "--new-workspace", "--label", label, "--focus")
@@ -147,7 +148,7 @@ def user_text(entry):
 
 
 def active_prompts(transcript_path):
-    """最後の記録から親をたどり、今の会話に残っている依頼を古い順に返す。応答の途中で止めた依頼は除く。"""
+    """最後の記録から親をたどり、今の会話に残っている依頼を古い順に返す。要約の前の依頼も含め、応答の途中で止めた依頼は除く。"""
     entries = {}
     last = None
     with open(transcript_path) as f:
@@ -168,7 +169,8 @@ def active_prompts(transcript_path):
     while last in entries and last not in seen:
         seen.add(last)
         chain.append(entries[last])
-        last = entries[last].get("parentUuid")
+        # 会話を要約した境目の記録は parentUuid を持たず、要約の前の記録を logicalParentUuid で指す
+        last = entries[last].get("parentUuid") or entries[last].get("logicalParentUuid")
 
     prompts = []
     for entry in reversed(chain):
@@ -247,8 +249,9 @@ def run_label(session_id, pane_id, transcript_path):
     key = prompts_key(prompts)
     if read_state(session_id).get("key") == key:
         return
+    previous_label = read_state(session_id).get("label")
     token = f"{os.getpid()}-{key}"
-    write_state(session_id, key=key, token=token)
+    write_state(session_id, key=key, token=token, label=previous_label)
 
     rule = latest_rule_label(prompts)
     request = build_request(prompts, rule)
@@ -260,7 +263,7 @@ def run_label(session_id, pane_id, transcript_path):
 
     if read_state(session_id).get("token") != token:
         return
-    apply_label(pane_id, label)
+    apply_label(pane_id, label, previous_label)
     write_state(session_id, key=key, token=token, label=label)
 
 
