@@ -3,13 +3,15 @@
 
 名前は「<目的>｜完了:<完了の基準>」の形にする。
 
-- 目的: ルールに当たる依頼があれば、その名前を使う。無ければ Haiku が依頼から作る
-  - MR レビューの依頼: "Codereview MR !<id>"
-  - JIRA のチケットに取り組む依頼: "<課題キー>"（例 "NUTSKAIZEN-856"）
-  - MR レビューと JIRA の両方に当たるときは MR レビューを優先し、複数の依頼が当たるときは新しい依頼を使う
-- 完了の基準: Haiku が最初の依頼と直近の依頼から作る
-応答を終えるたびに、今の会話に残っている依頼の並びが前回と違えば付け直す。
-Haiku が失敗したときは、ルールの名前があればそれだけを付け、無ければ名前を変えない。
+- 目的: セッションで最初に決めたものを保存し、以後は変えない。途中で作業が移っても名前の目的は動かさない
+  - ルールに当たる依頼があれば、最も古い依頼の名前を使う
+    - MR レビューの依頼: "Codereview MR !<id>"
+    - JIRA のチケットに取り組む依頼: "<課題キー>"（例 "NUTSKAIZEN-856"）
+    - MR レビューと JIRA の両方に当たるときは MR レビューを優先する
+  - 当たらなければ Haiku が最初の依頼から作る
+- 完了の基準: その目的に対して、Haiku が最初の依頼と直近の依頼から作る
+応答を終えるたびに、今の会話に残っている依頼の並びが前回と違えば完了の基準を付け直す。
+Haiku が失敗したときは、目的が決まっていれば目的だけを付け、決まっていなければ名前を変えない。
 
 Stop で動かし、会話記録で今の会話に残っている依頼だけを見る。送信を取り消した依頼は Stop を起こさず、
 会話記録では別の枝に残る。応答の途中で止めた依頼は、直後に中断の記録が入る。どちらも名前の元にしない。
@@ -38,8 +40,8 @@ LABEL_PROMPT = (
     "次の2行だけを出力する。説明や記号は付けない。\n"
     "目的: <作業の目的。日本語の15文字以内の名詞句>\n"
     "完了: <何ができたら終わりか。日本語の15文字以内。例「MRを作成」「原因を特定」「方針を合意」>\n"
-    "目的が既に決まっているときは、目的の行もそのまま出力する。\n"
-    "最初の依頼で始めた作業が直近の依頼で別の作業に移っていれば、直近の作業を目的にする。\n\n"
+    "目的が既に決まっているときは、目的の行もそのまま出力し、完了の基準はその目的に対して書く。\n"
+    "目的が決まっていないときは、最初の依頼から目的を決める。直近の依頼は完了の基準を絞るためだけに使う。\n\n"
 )
 INTERRUPTED = "[Request interrupted by user]"
 # 依頼でない記録（シェルの実行、コマンドの出力、通知）
@@ -185,8 +187,8 @@ def active_prompts(transcript_path):
     return prompts
 
 
-def latest_rule_label(prompts):
-    for prompt in reversed(prompts):
+def earliest_rule_label(prompts):
+    for prompt in prompts:
         label = rule_label(prompt)
         if label:
             return label
@@ -249,14 +251,15 @@ def run_label(session_id, pane_id, transcript_path):
     key = prompts_key(prompts)
     if read_state(session_id).get("key") == key:
         return
-    previous_label = read_state(session_id).get("label")
+    state = read_state(session_id)
+    previous_label = state.get("label")
+    fixed = state.get("purpose") or earliest_rule_label(prompts)
     token = f"{os.getpid()}-{key}"
-    write_state(session_id, key=key, token=token, label=previous_label)
+    write_state(session_id, key=key, token=token, label=previous_label, purpose=fixed)
 
-    rule = latest_rule_label(prompts)
-    request = build_request(prompts, rule)
-    purpose, done = generate_parts(request) if request else (None, None)
-    purpose = rule or purpose
+    request = build_request(prompts, fixed)
+    generated, done = generate_parts(request) if request else (None, None)
+    purpose = fixed or generated
     if not purpose:
         return
     label = f"{purpose}{SEPARATOR}{done}" if done else purpose
@@ -264,7 +267,7 @@ def run_label(session_id, pane_id, transcript_path):
     if read_state(session_id).get("token") != token:
         return
     apply_label(pane_id, label, previous_label)
-    write_state(session_id, key=key, token=token, label=label)
+    write_state(session_id, key=key, token=token, label=label, purpose=purpose)
 
 
 def main():
