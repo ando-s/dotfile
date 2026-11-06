@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""依頼から作業の対象を読み取り、herdr のワークスペースに名前を付ける。
+"""依頼から作業の目的と完了の基準を読み取り、herdr のワークスペースに名前を付ける。
 
-名前はルールに当たるものを優先し、当たらなければセッションの最初の依頼から作る。
+名前は「<目的>｜完了:<完了の基準>」の形にする。
 
-- MR レビューの依頼: "Codereview MR !<id>"
-- JIRA のチケットに取り組む依頼: "<課題キー>"（例 "NUTSKAIZEN-856"）
-- どちらにも当たらない最初の依頼: Haiku が依頼から作った短い作業名
-MR レビューと JIRA の両方に当たるときは MR レビューを優先する。
-ルールの名前は応答を終えるたびに直近の依頼で付け直し、作業名はセッションに1回だけ付ける。作業名を付けたあとにルールに当たれば、ルールの名前で上書きする。
+- 目的: ルールに当たる依頼があれば、その名前を使う。無ければ Haiku が依頼から作る
+  - MR レビューの依頼: "Codereview MR !<id>"
+  - JIRA のチケットに取り組む依頼: "<課題キー>"（例 "NUTSKAIZEN-856"）
+  - MR レビューと JIRA の両方に当たるときは MR レビューを優先し、複数の依頼が当たるときは新しい依頼を使う
+- 完了の基準: Haiku が最初の依頼と直近の依頼から作る
+応答を終えるたびに、今の会話に残っている依頼の並びが前回と違えば付け直す。
+Haiku が失敗したときは、ルールの名前があればそれだけを付け、無ければ名前を変えない。
 
 Stop で動かし、会話記録で今の会話に残っている依頼だけを見る。送信を取り消した依頼は Stop を起こさず、
 会話記録では別の枝に残る。応答の途中で止めた依頼は、直後に中断の記録が入る。どちらも名前の元にしない。
 
 今のワークスペースにこのペインしか無ければ名前を変え、ほかのペインもあればこのペインを新しいワークスペースに移す。
 既に同じ名前のワークスペースにいれば何もしない。失敗しても応答は止めない。
-会話記録の読み取りと作業名の生成は数秒かかるため、切り離した子プロセスで行う。
+会話記録の読み取りと名前の生成は数秒かかるため、切り離した子プロセスで行う。
+子プロセスが重なったときは、最後に始めたものだけが名前を付ける。
 """
+import hashlib
 import json
 import os
 import re
@@ -23,11 +27,18 @@ import subprocess
 import sys
 
 STATE_DIR = os.path.expanduser("~/.claude/herdr-sessions/labels")
-GENERIC_MIN_PROMPT_CHARS = 8
-GENERIC_MAX_LABEL_CHARS = 20
-GENERIC_PROMPT = (
-    "herdr のワークスペース名を付ける。次の依頼の作業内容を、日本語の15文字以内の名詞句で1行だけ出力する。"
-    "説明や記号は付けない。\n\n依頼: "
+MIN_PROMPT_CHARS = 8
+MAX_PART_CHARS = 18
+RECENT_PROMPTS = 3
+PROMPT_EXCERPT_CHARS = 600
+SEPARATOR = "｜完了:"
+LABEL_PROMPT = (
+    "herdr のワークスペース名を付ける。下の依頼から、このセッションの作業の目的と完了の基準を読み取り、"
+    "次の2行だけを出力する。説明や記号は付けない。\n"
+    "目的: <作業の目的。日本語の15文字以内の名詞句>\n"
+    "完了: <何ができたら終わりか。日本語の15文字以内。例「MRを作成」「原因を特定」「方針を合意」>\n"
+    "目的が既に決まっているときは、目的の行もそのまま出力する。\n"
+    "最初の依頼で始めた作業が直近の依頼で別の作業に移っていれば、直近の作業を目的にする。\n\n"
 )
 INTERRUPTED = "[Request interrupted by user]"
 # 依頼でない記録（シェルの実行、コマンドの出力、通知）
@@ -89,15 +100,17 @@ def state_path(session_id):
 def read_state(session_id):
     try:
         with open(state_path(session_id)) as f:
-            return f.read().strip()
-    except OSError:
-        return None
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
-def write_state(session_id, kind):
+def write_state(session_id, **state):
     os.makedirs(STATE_DIR, exist_ok=True)
-    with open(state_path(session_id), "w") as f:
-        f.write(kind)
+    tmp = state_path(session_id) + f".{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(state, f, ensure_ascii=False)
+    os.replace(tmp, state_path(session_id))
 
 
 def apply_label(pane_id, label):
@@ -170,47 +183,85 @@ def active_prompts(transcript_path):
     return prompts
 
 
-def generate_label(prompt):
+def latest_rule_label(prompts):
+    for prompt in reversed(prompts):
+        label = rule_label(prompt)
+        if label:
+            return label
+    return None
+
+
+def excerpt(prompt):
+    return prompt.strip()[:PROMPT_EXCERPT_CHARS]
+
+
+def build_request(prompts, purpose):
+    candidates = [
+        p for p in prompts
+        if not p.lstrip().startswith("/") and len(p.strip()) >= MIN_PROMPT_CHARS
+    ]
+    if not candidates:
+        return None
+    first, recent = candidates[0], candidates[1:][-RECENT_PROMPTS:]
+    lines = [LABEL_PROMPT]
+    if purpose:
+        lines.append(f"決まっている目的: {purpose}\n")
+    lines.append(f"最初の依頼:\n{excerpt(first)}\n")
+    for i, prompt in enumerate(recent, 1):
+        lines.append(f"直近の依頼{i}:\n{excerpt(prompt)}\n")
+    return "\n".join(lines)
+
+
+def clean(text):
+    return text.strip().strip("「」\"'`*").strip()[:MAX_PART_CHARS]
+
+
+def generate_parts(request):
     env = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
     result = subprocess.run(
         ["claude", "-p", "--model", "haiku", "--settings", '{"disableAllHooks":true}'],
-        input=GENERIC_PROMPT + prompt[:2000],
+        input=request,
         capture_output=True, text=True, timeout=60, env=env, cwd=os.path.expanduser("~"),
     )
     if result.returncode != 0:
-        return None
-    lines = [line.strip().strip("「」\"'`*") for line in result.stdout.splitlines() if line.strip()]
-    if not lines:
-        return None
-    return lines[0][:GENERIC_MAX_LABEL_CHARS] or None
+        return None, None
+    purpose = done = None
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("目的:") or line.startswith("目的："):
+            purpose = clean(line[3:])
+        elif line.startswith("完了:") or line.startswith("完了："):
+            done = clean(line[3:])
+    return purpose or None, done or None
+
+
+def prompts_key(prompts):
+    return hashlib.sha256("\0".join(prompts).encode()).hexdigest()
 
 
 def run_label(session_id, pane_id, transcript_path):
-    """切り離した子プロセスで名前を決めて付ける。作業名の生成中にルールの名前が付いていれば何もしない。"""
+    """切り離した子プロセスで名前を決めて付ける。生成中に新しい子プロセスが始まっていれば何もしない。"""
     prompts = active_prompts(transcript_path)
     if not prompts:
         return
+    key = prompts_key(prompts)
+    if read_state(session_id).get("key") == key:
+        return
+    token = f"{os.getpid()}-{key}"
+    write_state(session_id, key=key, token=token)
 
-    label = rule_label(prompts[-1])
-    if label:
-        apply_label(pane_id, label)
-        write_state(session_id, "rule")
+    rule = latest_rule_label(prompts)
+    request = build_request(prompts, rule)
+    purpose, done = generate_parts(request) if request else (None, None)
+    purpose = rule or purpose
+    if not purpose:
         return
+    label = f"{purpose}{SEPARATOR}{done}" if done else purpose
 
-    if read_state(session_id):
+    if read_state(session_id).get("token") != token:
         return
-    first = next(
-        (p for p in prompts
-         if not p.lstrip().startswith("/") and len(p.strip()) >= GENERIC_MIN_PROMPT_CHARS),
-        None,
-    )
-    if not first:
-        return
-    write_state(session_id, "generic-pending")
-    label = generate_label(first)
-    if label and read_state(session_id) == "generic-pending":
-        apply_label(pane_id, label)
-        write_state(session_id, "generic")
+    apply_label(pane_id, label)
+    write_state(session_id, key=key, token=token, label=label)
 
 
 def main():
