@@ -4,11 +4,10 @@
 名前は「<目的>｜完了:<完了の基準>」の形にする。
 
 - 目的: セッションで最初に決めたものを保存し、以後は変えない。途中で作業が移っても名前の目的は動かさない
-  - ルールに当たる依頼があれば、最も古い依頼の名前を使う
-    - MR レビューの依頼: "Codereview MR !<id>"
-    - JIRA のチケットに取り組む依頼: "<課題キー>"（例 "NUTSKAIZEN-856"）
-    - MR レビューと JIRA の両方に当たるときは MR レビューを優先する
-  - 当たらなければ Haiku が最初の依頼から作る
+  - MR レビューの依頼があれば、最も古い依頼から "Codereview MR !<id>" を使う
+  - JIRA のチケットに取り組む依頼があれば、最も古い依頼の課題キーで題名を acli から取り、Haiku が題名を縮めて目的にする
+    - 課題キーと題名は保存し、ステータスラインに出す。課題キーだけでは何の作業か分からないため、名前には入れない
+  - どちらにも当たらなければ Haiku が最初の依頼から作る
 - 完了の基準: その目的に対して、Haiku が最初の依頼と直近の依頼から作る
 応答を終えるたびに、今の会話に残っている依頼の並びが前回と違えば完了の基準を付け直す。
 Haiku が失敗したときは、目的が決まっていれば目的だけを付け、決まっていなければ名前を変えない。
@@ -41,7 +40,8 @@ LABEL_PROMPT = (
     "目的: <作業の目的。日本語の15文字以内の名詞句>\n"
     "完了: <何ができたら終わりか。日本語の15文字以内。例「MRを作成」「原因を特定」「方針を合意」>\n"
     "目的が既に決まっているときは、目的の行もそのまま出力し、完了の基準はその目的に対して書く。\n"
-    "目的が決まっていないときは、最初の依頼から目的を決める。直近の依頼は完了の基準を絞るためだけに使う。\n\n"
+    "目的が決まっていないときは、最初の依頼から目的を決める。直近の依頼は完了の基準を絞るためだけに使う。\n"
+    "チケットの題名があれば、目的はその題名を15文字以内に縮めたものにする。\n\n"
 )
 INTERRUPTED = "[Request interrupted by user]"
 # 依頼でない記録（シェルの実行、コマンドの出力、通知）
@@ -64,6 +64,7 @@ TICKET_KEY_PATTERNS = [
     re.compile(r"atlassian\.net/browse/([A-Z][A-Z0-9]+-\d+)"),
     re.compile(r"(?<![A-Za-z0-9])([A-Z][A-Z0-9]{3,}-\d+)(?![A-Za-z0-9])"),
 ]
+TICKET_KEY_ONLY = re.compile(r"[A-Z][A-Z0-9]{3,}-\d+")
 
 
 def herdr(*args):
@@ -84,16 +85,38 @@ def first_match(patterns, text):
     return None
 
 
-def rule_label(prompt):
+def review_label(prompt):
     if REVIEW_WORD.search(prompt):
         iid = first_match(MR_ID_PATTERNS, prompt)
         if iid:
             return f"Codereview MR !{iid}"
-    if TICKET_WORD.search(prompt):
-        key = first_match(TICKET_KEY_PATTERNS, prompt)
-        if key:
-            return key
     return None
+
+
+def ticket_key(prompt):
+    if TICKET_WORD.search(prompt):
+        return first_match(TICKET_KEY_PATTERNS, prompt)
+    return None
+
+
+def first_found(finder, prompts):
+    for prompt in prompts:
+        found = finder(prompt)
+        if found:
+            return found
+    return None
+
+
+def fetch_ticket(key):
+    try:
+        result = subprocess.run(
+            ["acli", "jira", "workitem", "view", key, "--fields", "summary", "--json"],
+            capture_output=True, text=True, timeout=20,
+        )
+        summary = json.loads(result.stdout)["fields"]["summary"] if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, TypeError):
+        summary = None
+    return {"key": key, "summary": summary}
 
 
 def state_path(session_id):
@@ -187,19 +210,11 @@ def active_prompts(transcript_path):
     return prompts
 
 
-def earliest_rule_label(prompts):
-    for prompt in prompts:
-        label = rule_label(prompt)
-        if label:
-            return label
-    return None
-
-
 def excerpt(prompt):
     return prompt.strip()[:PROMPT_EXCERPT_CHARS]
 
 
-def build_request(prompts, purpose):
+def build_request(prompts, purpose, ticket=None):
     candidates = [
         p for p in prompts
         if not p.lstrip().startswith("/") and len(p.strip()) >= MIN_PROMPT_CHARS
@@ -210,6 +225,8 @@ def build_request(prompts, purpose):
     lines = [LABEL_PROMPT]
     if purpose:
         lines.append(f"決まっている目的: {purpose}\n")
+    elif ticket and ticket.get("summary"):
+        lines.append(f"チケットの題名: {ticket['summary']}\n")
     lines.append(f"最初の依頼:\n{excerpt(first)}\n")
     for i, prompt in enumerate(recent, 1):
         lines.append(f"直近の依頼{i}:\n{excerpt(prompt)}\n")
@@ -253,13 +270,21 @@ def run_label(session_id, pane_id, transcript_path):
         return
     state = read_state(session_id)
     previous_label = state.get("label")
-    fixed = state.get("purpose") or earliest_rule_label(prompts)
+    fixed = state.get("purpose")
+    ticket = state.get("ticket")
+    if not ticket or not ticket.get("summary"):
+        # 課題キーだけを目的にしていた名前も、題名を取って付け直す
+        found = first_found(ticket_key, prompts) or (fixed if fixed and TICKET_KEY_ONLY.fullmatch(fixed) else None)
+        ticket = fetch_ticket(found) if found else None
+    if ticket and fixed == ticket["key"]:
+        fixed = None
+    fixed = fixed or first_found(review_label, prompts)
     token = f"{os.getpid()}-{key}"
-    write_state(session_id, key=key, token=token, label=previous_label, purpose=fixed)
+    write_state(session_id, key=key, token=token, label=previous_label, purpose=fixed, ticket=ticket)
 
-    request = build_request(prompts, fixed)
+    request = build_request(prompts, fixed, ticket)
     generated, done = generate_parts(request) if request else (None, None)
-    purpose = fixed or generated
+    purpose = fixed or generated or (ticket and ticket["key"])
     if not purpose:
         return
     label = f"{purpose}{SEPARATOR}{done}" if done else purpose
@@ -267,7 +292,7 @@ def run_label(session_id, pane_id, transcript_path):
     if read_state(session_id).get("token") != token:
         return
     apply_label(pane_id, label, previous_label)
-    write_state(session_id, key=key, token=token, label=label, purpose=purpose)
+    write_state(session_id, key=key, token=token, label=label, purpose=purpose, ticket=ticket)
 
 
 def main():
