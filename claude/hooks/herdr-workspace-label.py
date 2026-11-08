@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """依頼から作業の目的と完了の基準を読み取り、herdr のワークスペースに名前を付ける。
 
-名前は「<目的>｜完了:<完了の基準>」の形にする。
+名前は「<目的>｜ゴール:<完了の基準>」の形にする。「完了:」は終わったように読めるため使わない。
 
 - 目的: 最初の目的は聞かずに付ける。最初の3件の依頼のあいだは、補足や言い直しで目的が変わったら案を作り、
   応答を終えるのを止めて Claude に承認を聞かせる。承認されたら --set-purpose で変え、断られたら --keep-purpose で以後は案を出さない。
@@ -38,7 +38,19 @@ PURPOSE_SETTLE_PROMPTS = 3
 MAX_PART_CHARS = 18
 RECENT_PROMPTS = 3
 PROMPT_EXCERPT_CHARS = 600
-SEPARATOR = "｜完了:"
+SEPARATOR = "｜ゴール:"
+# 前に使っていた区切り。手で付け直した名前と、前の名前から目的と完了の基準を分けるときにも区切りとして扱う
+OLD_SEPARATORS = ("｜完了:", "｜進行中:")
+
+
+def split_label(label):
+    """名前を目的と完了の基準に分ける。区切りが無ければ完了の基準は None。"""
+    for separator in (SEPARATOR, *OLD_SEPARATORS):
+        if separator in label:
+            purpose, done = label.split(separator, 1)
+            return purpose.strip(), done
+    return label.strip(), None
+
 LABEL_PROMPT = (
     "herdr のワークスペース名を付ける。下の依頼から、このセッションの作業の目的と完了の基準を読み取り、"
     "次の2行だけを出力する。説明や記号は付けない。\n"
@@ -318,7 +330,7 @@ def run_label(session_id, pane_id, transcript_path, ask=False):
     shown = (workspace or {}).get("label")
     if previous_label and shown and not set_by_hook(shown):
         # 手で付け直した名前の目的を、以後も使う
-        state["purpose"] = shown.split(SEPARATOR)[0].strip()
+        state["purpose"] = split_label(shown)[0]
         previous_label, locked = shown, True
     ticket = state.get("ticket")
     if not ticket or not ticket.get("summary"):
@@ -359,7 +371,7 @@ def set_purpose(session_id, purpose):
     state = read_state(session_id)
     pane_id = state.get("pane_id")
     previous_label = state.get("label")
-    done = previous_label.split(SEPARATOR, 1)[1] if previous_label and SEPARATOR in previous_label else None
+    done = split_label(previous_label)[1] if previous_label else None
     label = f"{purpose}{SEPARATOR}{done}" if done else purpose
     state.update(purpose=purpose, locked=True, proposal=None, pending_label=label)
     write_state(session_id, **state)
