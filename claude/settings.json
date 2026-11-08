@@ -28,7 +28,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOME/.claude/hooks/herdr-workspace-label.py\""
+            "command": "python3 \"$HOME/.claude/hooks/herdr-workspace-label.py\"",
+            "timeout": 90
           }
         ]
       }

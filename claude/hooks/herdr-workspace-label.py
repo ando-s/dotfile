@@ -3,7 +3,9 @@
 
 名前は「<目的>｜完了:<完了の基準>」の形にする。
 
-- 目的: 最初の3件の依頼のあいだは、補足や言い直しを入れて作り直す。その後は保存したものを変えず、途中で作業が移っても名前の目的は動かさない
+- 目的: 最初の目的は聞かずに付ける。最初の3件の依頼のあいだは、補足や言い直しで目的が変わったら案を作り、
+  応答を終えるのを止めて Claude に承認を聞かせる。承認されたら --set-purpose で変え、断られたら --keep-purpose で以後は案を出さない。
+  4件目からは目的を変えず、途中で作業が移っても名前の目的は動かさない
   - ワークスペースの名前が前回このフックが付けたものから変わっていれば、手で付け直したものとみなし、その目的を以後も使う
   - MR レビューの依頼があれば、最も古い依頼から "Codereview MR !<id>" を使う
   - JIRA のチケットに取り組む依頼があれば、最も古い依頼の課題キーで題名を acli から取り、Haiku が題名を縮めて目的にする
@@ -19,7 +21,7 @@ Stop で動かし、会話記録で今の会話に残っている依頼だけを
 今のワークスペースにこのペインしか無いか、前回このセッションが付けた名前のままなら名前を変える。
 それ以外でほかのペインもあれば、このペインを新しいワークスペースに移す。
 既に同じ名前のワークスペースにいれば何もしない。失敗しても応答は止めない。
-会話記録の読み取りと名前の生成は数秒かかるため、切り離した子プロセスで行う。
+会話記録の読み取りと名前の生成は数秒かかるため、目的の案を出しうるとき以外は切り離した子プロセスで行う。
 子プロセスが重なったときは、最後に始めたものだけが名前を付ける。
 """
 import glob
@@ -43,6 +45,8 @@ LABEL_PROMPT = (
     "目的: <作業の目的。日本語の15文字以内の名詞句>\n"
     "完了: <何ができたら終わりか。日本語の15文字以内。例「MRを作成」「原因を特定」「方針を合意」>\n"
     "目的が既に決まっているときは、目的の行もそのまま出力し、完了の基準はその目的に対して書く。\n"
+    "今の目的が示されているときは、補足や言い直しで目的そのものが変わったときだけ新しい目的を出し、"
+    "変わっていなければ今の目的を一字も変えずに出力する。\n"
     "目的が決まっていないときは、最初の依頼から目的を決める。目的には、依頼が何を得たいか・何をしたいかを書き、"
     "依頼に出てくる語を組み替えて別の意味にしない。直近の依頼が最初の依頼の補足や言い直しなら目的に入れ、"
     "別の作業なら完了の基準を絞るためだけに使う。\n"
@@ -242,7 +246,7 @@ def candidate_prompts(prompts):
     return [p for p in prompts if not p.lstrip().startswith("/") and len(p.strip()) >= MIN_PROMPT_CHARS]
 
 
-def build_request(prompts, purpose, ticket=None):
+def build_request(prompts, purpose, ticket=None, current=None):
     candidates = candidate_prompts(prompts)
     if not candidates:
         return None
@@ -250,6 +254,8 @@ def build_request(prompts, purpose, ticket=None):
     lines = [LABEL_PROMPT]
     if purpose:
         lines.append(f"決まっている目的: {purpose}\n")
+    elif current:
+        lines.append(f"今の目的: {current}\n")
     elif ticket and ticket.get("summary"):
         lines.append(f"チケットの題名: {ticket['summary']}\n")
     lines.append(f"最初の依頼:\n{excerpt(first)}\n")
@@ -285,14 +291,26 @@ def prompts_key(prompts):
     return hashlib.sha256("\0".join(prompts).encode()).hexdigest()
 
 
-def run_label(session_id, pane_id, transcript_path):
-    """切り離した子プロセスで名前を決めて付ける。生成中に新しい子プロセスが始まっていれば何もしない。"""
+def needs_ask(state, prompts):
+    """目的の案を出して承認を聞きうるか。最初の目的が付いていて、まだ固定していない間だけ。"""
+    if not state.get("purpose") or state.get("locked"):
+        return False
+    if state.get("ticket", {}) and state["ticket"].get("summary"):
+        return False
+    if first_found(review_label, prompts):
+        return False
+    return len(candidate_prompts(prompts)) <= PURPOSE_SETTLE_PROMPTS
+
+
+def run_label(session_id, pane_id, transcript_path, ask=False):
+    """名前を決めて付ける。生成中に新しい処理が始まっていれば何もしない。
+    ask のときは、目的が変わる案を返し、目的は変えずに完了の基準だけを付け直す。"""
     prompts = active_prompts(transcript_path)
     if not prompts:
-        return
+        return None
     key = prompts_key(prompts)
     if read_state(session_id).get("key") == key:
-        return
+        return None
     state = read_state(session_id)
     previous_label = state.get("label")
     locked = bool(state.get("locked"))
@@ -302,34 +320,72 @@ def run_label(session_id, pane_id, transcript_path):
         # 手で付け直した名前の目的を、以後も使う
         state["purpose"] = shown.split(SEPARATOR)[0].strip()
         previous_label, locked = shown, True
-    settled = locked or len(candidate_prompts(prompts)) > PURPOSE_SETTLE_PROMPTS
-    fixed = state.get("purpose") if settled else None
     ticket = state.get("ticket")
     if not ticket or not ticket.get("summary"):
         # 課題キーだけを目的にしていた名前も、題名を取って付け直す
         stored = state.get("purpose")
         found = first_found(ticket_key, prompts) or (stored if stored and TICKET_KEY_ONLY.fullmatch(stored) else None)
         ticket = fetch_ticket(found) if found else None
-    if ticket and fixed == ticket["key"]:
-        fixed = None
-    fixed = fixed or first_found(review_label, prompts)
+    current = state.get("purpose")
+    if ticket and current == ticket["key"]:
+        current = None
+    settled = locked or (ticket and ticket.get("summary") and current) or len(candidate_prompts(prompts)) > PURPOSE_SETTLE_PROMPTS
+    fixed = (current if settled else None) or first_found(review_label, prompts)
     token = f"{os.getpid()}-{key}"
-    write_state(session_id, key=key, token=token, label=previous_label,
-                purpose=state.get("purpose"), ticket=ticket, locked=locked)
+    base = dict(key=key, token=token, purpose=state.get("purpose"), ticket=ticket, locked=locked, pane_id=pane_id)
+    write_state(session_id, label=previous_label, **base)
 
-    request = build_request(prompts, fixed, ticket)
+    request = build_request(prompts, fixed, ticket, current)
     generated, done = generate_parts(request) if request else (None, None)
-    purpose = fixed or generated or (ticket and ticket["key"])
+    purpose = fixed or generated or current or (ticket and ticket["key"])
     if not purpose:
-        return
+        return None
+    proposal = None
+    if ask and current and purpose != current and purpose not in state.get("rejected", []):
+        proposal, purpose = purpose, current
     label = f"{purpose}{SEPARATOR}{done}" if done else purpose
 
     if read_state(session_id).get("token") != token:
-        return
-    write_state(session_id, key=key, token=token, label=previous_label, pending_label=label,
-                purpose=state.get("purpose"), ticket=ticket, locked=locked)
+        return None
+    base["purpose"] = purpose
+    write_state(session_id, label=previous_label, pending_label=label, **base)
     apply_label(pane_id, label, previous_label)
-    write_state(session_id, key=key, token=token, label=label, purpose=purpose, ticket=ticket, locked=locked)
+    write_state(session_id, label=label, proposal=proposal, **base)
+    return proposal
+
+
+def set_purpose(session_id, purpose):
+    """承認された目的に変え、以後は固定する。完了の基準は今のものを残す。"""
+    state = read_state(session_id)
+    pane_id = state.get("pane_id")
+    previous_label = state.get("label")
+    done = previous_label.split(SEPARATOR, 1)[1] if previous_label and SEPARATOR in previous_label else None
+    label = f"{purpose}{SEPARATOR}{done}" if done else purpose
+    state.update(purpose=purpose, locked=True, proposal=None, pending_label=label)
+    write_state(session_id, **state)
+    if pane_id:
+        apply_label(pane_id, label, previous_label)
+    state.update(label=label)
+    write_state(session_id, **state)
+    print(f"ワークスペース名を「{label}」にしました")
+
+
+def keep_purpose(session_id):
+    """今の目的のまま固定し、以後は案を出さない。"""
+    state = read_state(session_id)
+    state.update(locked=True, proposal=None)
+    write_state(session_id, **state)
+    print(f"目的を「{state.get('purpose')}」のまま固定しました")
+
+
+ASK_REASON = """ワークスペース名の目的を変える案があります。応答を続ける前に、AskUserQuestion で次の1問だけを聞いてください。
+- 質問: ワークスペース名の目的を「{proposal}」に変えますか？（今は「{current}」）
+- 選択肢1: 「{proposal}」に変える
+- 選択肢2: 「{current}」のまま
+答えに応じて、次のどれか1つを Bash で実行し、結果を1行で伝えて終えてください。ほかの作業はしないでください。
+- 変える: python3 "$HOME/.claude/hooks/herdr-workspace-label.py" --set-purpose {sid} '{proposal}'
+- そのまま: python3 "$HOME/.claude/hooks/herdr-workspace-label.py" --keep-purpose {sid}
+- 自由に書かれた目的: python3 "$HOME/.claude/hooks/herdr-workspace-label.py" --set-purpose {sid} '<書かれた目的>'"""
 
 
 def main():
@@ -346,6 +402,17 @@ def main():
     transcript_path = payload.get("transcript_path")
     if not session_id or not transcript_path:
         return
+    pane_id = os.environ["HERDR_PANE_ID"]
+    state = read_state(session_id)
+    # 承認を聞いたあとの応答の終わりには、もう一度聞かない
+    if not payload.get("stop_hook_active") and needs_ask(state, active_prompts(transcript_path)):
+        current = state.get("purpose")
+        proposal = run_label(session_id, pane_id, transcript_path, ask=True)
+        if proposal:
+            reason = ASK_REASON.format(
+                proposal=proposal.replace("'", ""), current=current, sid=session_id)
+            print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+        return
     subprocess.Popen(
         [sys.executable, os.path.abspath(__file__), "--label",
          session_id, os.environ["HERDR_PANE_ID"], transcript_path],
@@ -358,6 +425,10 @@ if __name__ == "__main__":
     try:
         if len(sys.argv) == 5 and sys.argv[1] == "--label":
             run_label(sys.argv[2], sys.argv[3], sys.argv[4])
+        elif len(sys.argv) == 4 and sys.argv[1] == "--set-purpose":
+            set_purpose(sys.argv[2], sys.argv[3].strip()[:MAX_PART_CHARS * 2])
+        elif len(sys.argv) == 3 and sys.argv[1] == "--keep-purpose":
+            keep_purpose(sys.argv[2])
         else:
             main()
     except Exception:
