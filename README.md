@@ -59,13 +59,6 @@ Claude Code 起動中の場合は **再起動**（agent / skill list は起動�
 
 詳細・運用方針: `claude/docs/TDD-with-ai.md`
 
-### Codex と Claude Code の分担開発
-
-- doc: `claude/docs/codex-claude-workflow.md` — 役割分担、Herdr での依頼と見届け、文書の置き場所、方針変更の手順、確認の分け方
-- template: `claude/templates/codex-claude/` — `AGENTS.md`、`CLAUDE.md`、スキル（`delegate-to-codex`・`decision-change`）、文書チェックの Stop フック、`docs/` の雛形
-
-導入: `cp -Rn ~/dev/dotfile/claude/templates/codex-claude/. <プロジェクト>` の後、`<project>` などの置き換え（手順は doc の末尾）
-
 ### tmux 設定
 
 - `tmux/.tmux.conf` — `~/.tmux.conf` に symlink される。マシン固有の設定は `~/.tmux.local.conf`（dotfile には入れない）に書く。最後に読むので、共有の設定より優先される
