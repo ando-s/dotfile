@@ -7,7 +7,8 @@
   応答を終えるのを止めて Claude に承認を聞かせる。承認されたら --set-purpose で変え、断られたら --keep-purpose で以後は案を出さない。
   4件目からは目的を変えず、途中で作業が移っても名前の目的は動かさない
   - ワークスペースの名前が前回このフックが付けたものから変わっていれば、手で付け直したものとみなし、その目的を以後も使う
-  - MR レビューの依頼があれば、最も古い依頼から "Codereview MR !<id>" を使う
+  - MR レビューの依頼があれば、最も古い依頼の MR の題名を glab から取り、"!<id> <Haiku が題名を縮めたもの>" を使う
+    - 題名が取れなければ "!<id>" だけを使う
   - JIRA のチケットに取り組む依頼があれば、最も古い依頼の課題キーで題名を acli から取り、Haiku が題名を縮めて目的にする
     - 課題キーと題名は保存し、ステータスラインに出す。課題キーだけでは何の作業か分からないため、名前には入れない
   - どちらにも当たらなければ Haiku が最初の依頼から作る
@@ -19,7 +20,7 @@ Stop で動かし、会話記録で今の会話に残っている依頼だけを
 会話記録では別の枝に残る。応答の途中で止めた依頼は、直後に中断の記録が入る。どちらも名前の元にしない。
 
 今のワークスペースにこのペインしか無いか、前回このセッションが付けた名前のままなら名前を変える。
-それ以外でほかのペインもあれば、このペインを新しいワークスペースに移す。
+それ以外でほかのペインもあれば何もしない。ペインを別のワークスペースへ移すことはしない。
 既に同じ名前のワークスペースにいれば何もしない。失敗しても応答は止めない。
 会話記録の読み取りと名前の生成は数秒かかるため、目的の案を出しうるとき以外は切り離した子プロセスで行う。
 子プロセスが重なったときは、最後に始めたものだけが名前を付ける。
@@ -62,7 +63,8 @@ LABEL_PROMPT = (
     "目的が決まっていないときは、最初の依頼から目的を決める。目的には、依頼が何を得たいか・何をしたいかを書き、"
     "依頼に出てくる語を組み替えて別の意味にしない。直近の依頼が最初の依頼の補足や言い直しなら目的に入れ、"
     "別の作業なら完了の基準を絞るためだけに使う。\n"
-    "チケットの題名があれば、目的はその題名を15文字以内に縮めたものにする。\n\n"
+    "チケットか MR の題名があれば、目的はその題名を15文字以内に縮めたものにする。"
+    "docs(nuts): のような接頭辞と、末尾の (NUTSAUCF-58) のような課題キーは入れない。\n\n"
 )
 INTERRUPTED = "[Request interrupted by user]"
 # 依頼でない記録（シェルの実行、コマンドの出力、通知）
@@ -106,12 +108,22 @@ def first_match(patterns, text):
     return None
 
 
-def review_label(prompt):
+def review_iid(prompt):
     if REVIEW_WORD.search(prompt):
-        iid = first_match(MR_ID_PATTERNS, prompt)
-        if iid:
-            return f"Codereview MR !{iid}"
+        return first_match(MR_ID_PATTERNS, prompt)
     return None
+
+
+def fetch_mr(iid):
+    """MR の題名を取る。glab は今の作業ディレクトリのリポジトリを見る。"""
+    try:
+        result = subprocess.run(
+            ["glab", "mr", "view", iid, "-F", "json"], capture_output=True, text=True, timeout=20,
+        )
+        title = json.loads(result.stdout)["title"] if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, TypeError):
+        title = None
+    return {"iid": iid, "title": title}
 
 
 def ticket_key(prompt):
@@ -173,6 +185,28 @@ def write_state(session_id, **state):
     os.replace(tmp, state_path(session_id))
 
 
+def resolve_pane_id(session_id, pane_id):
+    """ペインを別のワークスペースへ移すとペインIDが変わるため、見つからなければセッションIDで引き直す。"""
+    if herdr("pane", "get", pane_id):
+        return pane_id
+    for pane in (herdr("pane", "list") or {}).get("panes", []):
+        if (pane.get("agent_session") or {}).get("value") == session_id:
+            return pane["pane_id"]
+    return pane_id
+
+
+def report_reference(pane_id, ticket, mr):
+    """課題キーかMR番号を、サイドバーの $ref に出す。"""
+    ref = (ticket or {}).get("key") or (f"!{mr['iid']}" if (mr or {}).get("iid") else None)
+    if not ref:
+        return
+    pane, _ = current_workspace(pane_id)
+    if not pane:
+        return
+    herdr("pane", "report-metadata", pane["pane_id"], "--source", "herdr-workspace-label", "--token", f"ref={ref}")
+    herdr("workspace", "report-metadata", pane["workspace_id"], "--source", "herdr-workspace-label", "--token", f"ref={ref}")
+
+
 def current_workspace(pane_id):
     pane = (herdr("pane", "get", pane_id) or {}).get("pane")
     if not pane:
@@ -187,10 +221,9 @@ def apply_label(pane_id, label, previous_label=None):
     if not workspace or workspace.get("label") == label:
         return
 
+    # ほかのペインと同居しているときは名前を変えない。ペインを別のワークスペースへ移すこともしない
     if workspace.get("pane_count") == 1 or (previous_label and workspace.get("label") == previous_label):
         herdr("workspace", "rename", pane["workspace_id"], label)
-    else:
-        herdr("pane", "move", pane["pane_id"], "--new-workspace", "--label", label, "--focus")
 
 
 def user_text(entry):
@@ -258,7 +291,7 @@ def candidate_prompts(prompts):
     return [p for p in prompts if not p.lstrip().startswith("/") and len(p.strip()) >= MIN_PROMPT_CHARS]
 
 
-def build_request(prompts, purpose, ticket=None, current=None):
+def build_request(prompts, purpose, ticket=None, current=None, mr=None):
     candidates = candidate_prompts(prompts)
     if not candidates:
         return None
@@ -268,6 +301,8 @@ def build_request(prompts, purpose, ticket=None, current=None):
         lines.append(f"決まっている目的: {purpose}\n")
     elif current:
         lines.append(f"今の目的: {current}\n")
+    elif mr and mr.get("title"):
+        lines.append(f"MR の題名: {mr['title']}\n")
     elif ticket and ticket.get("summary"):
         lines.append(f"チケットの題名: {ticket['summary']}\n")
     lines.append(f"最初の依頼:\n{excerpt(first)}\n")
@@ -309,7 +344,7 @@ def needs_ask(state, prompts):
         return False
     if state.get("ticket", {}) and state["ticket"].get("summary"):
         return False
-    if first_found(review_label, prompts):
+    if first_found(review_iid, prompts):
         return False
     return len(candidate_prompts(prompts)) <= PURPOSE_SETTLE_PROMPTS
 
@@ -320,6 +355,7 @@ def run_label(session_id, pane_id, transcript_path, ask=False):
     prompts = active_prompts(transcript_path)
     if not prompts:
         return None
+    pane_id = resolve_pane_id(session_id, pane_id)
     key = prompts_key(prompts)
     if read_state(session_id).get("key") == key:
         return None
@@ -341,14 +377,25 @@ def run_label(session_id, pane_id, transcript_path, ask=False):
     current = state.get("purpose")
     if ticket and current == ticket["key"]:
         current = None
-    settled = locked or (ticket and ticket.get("summary") and current) or len(candidate_prompts(prompts)) > PURPOSE_SETTLE_PROMPTS
-    fixed = (current if settled else None) or first_found(review_label, prompts)
+    mr = state.get("mr")
+    if not mr or not mr.get("title"):
+        iid = first_found(review_iid, prompts) or (mr and mr.get("iid"))
+        mr = fetch_mr(iid) if iid else None
+    mr_prefix = f"!{mr['iid']}" if mr else None
+    if mr and not locked and current and not current.startswith(mr_prefix + " "):
+        # 前の形の名前（Codereview MR !<id>）は捨てて付け直す
+        current = None
+    settled = locked or (ticket and ticket.get("summary") and current) or (mr and current) \
+        or len(candidate_prompts(prompts)) > PURPOSE_SETTLE_PROMPTS
+    fixed = current if settled else None
     token = f"{os.getpid()}-{key}"
-    base = dict(key=key, token=token, purpose=state.get("purpose"), ticket=ticket, locked=locked, pane_id=pane_id)
+    base = dict(key=key, token=token, purpose=state.get("purpose"), ticket=ticket, mr=mr, locked=locked, pane_id=pane_id)
     write_state(session_id, label=previous_label, **base)
 
-    request = build_request(prompts, fixed, ticket, current)
+    request = build_request(prompts, fixed, ticket, current, mr)
     generated, done = generate_parts(request) if request else (None, None)
+    if mr and not fixed:
+        generated = f"{mr_prefix} {generated}" if generated else mr_prefix
     purpose = fixed or generated or current or (ticket and ticket["key"])
     if not purpose:
         return None
@@ -362,6 +409,7 @@ def run_label(session_id, pane_id, transcript_path, ask=False):
     base["purpose"] = purpose
     write_state(session_id, label=previous_label, pending_label=label, **base)
     apply_label(pane_id, label, previous_label)
+    report_reference(resolve_pane_id(session_id, pane_id), ticket, mr)
     write_state(session_id, label=label, proposal=proposal, **base)
     return proposal
 
@@ -376,8 +424,9 @@ def set_purpose(session_id, purpose):
     state.update(purpose=purpose, locked=True, proposal=None, pending_label=label)
     write_state(session_id, **state)
     if pane_id:
+        pane_id = resolve_pane_id(session_id, pane_id)
         apply_label(pane_id, label, previous_label)
-    state.update(label=label)
+    state.update(label=label, pane_id=pane_id)
     write_state(session_id, **state)
     print(f"ワークスペース名を「{label}」にしました")
 
