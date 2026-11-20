@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""消えた Herdr のワークスペースと Claude セッションを開き直す。
+
+元にするのは2つ。
+  1. Herdr が session.json を書き換える前に残す控え ~/.config/herdr/session-snapshots/
+     ワークスペース名・作業ディレクトリ・ペインのセッションIDが入っている
+  2. ~/.claude/hooks/herdr-session-registry.py が書く一覧 ~/.claude/herdr-sessions/
+     控えにセッションIDが無いペインを、タブIDの頭（ワークスペースID）で埋める
+
+控えは新しいほうから SNAPSHOT_LOOKBACK 個を見て、いま開いていないセッションが最も多いものを使う。
+数が並べば新しいほうを使う。
+1つのワークスペースを1つのワークスペースとして作り直し、ペインごとに claude --resume を流す。
+resume は会話の記録が置かれたディレクトリで流す。herdr-focus で棚に上げたセッションは開き直さない。ワークツリーに入ったセッションはワークツリーで開く。
+
+  herdr-restore                      開き直す
+  herdr-restore --dry-run            開き直す対象を表示するだけ
+  herdr-restore --snapshot <path>    使う控えを指定する
+  herdr-restore --forget <session_id>  一覧から消す
+"""
+import glob
+import json
+import os
+import shlex
+import subprocess
+import sys
+
+REGISTRY_DIR = os.path.expanduser("~/.claude/herdr-sessions")
+SNAPSHOT_DIR = os.path.expanduser("~/.config/herdr/session-snapshots")
+PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
+SNAPSHOT_LOOKBACK = 5
+
+
+def herdr(*args):
+    out = subprocess.run(["herdr", *args], capture_output=True, text=True, check=True).stdout
+    # pane run は成功時に何も出力しない
+    return json.loads(out)["result"] if out.strip() else None
+
+
+def open_session_ids():
+    ids = set()
+    for ws in herdr("workspace", "list")["workspaces"]:
+        for pane in herdr("pane", "list", "--workspace", ws["workspace_id"])["panes"]:
+            session = pane.get("agent_session") or {}
+            if session.get("value"):
+                ids.add(session["value"])
+    return ids
+
+
+def transcript_cwd(session_id):
+    """会話の記録に最後に書かれた作業ディレクトリ。記録が無ければ None"""
+    paths = glob.glob(os.path.join(PROJECTS_DIR, "*", f"{session_id}.jsonl"))
+    if not paths:
+        return None
+    cwd = None
+    with open(paths[0]) as f:
+        for line in f:
+            if '"cwd"' not in line:
+                continue
+            try:
+                cwd = json.loads(line).get("cwd") or cwd
+            except json.JSONDecodeError:
+                continue
+    return cwd
+
+
+def registry_by_workspace():
+    """ワークスペースID → 一覧に残るセッションID の並び"""
+    result = {}
+    for path in sorted(glob.glob(os.path.join(REGISTRY_DIR, "*.json"))):
+        with open(path) as f:
+            entry = json.load(f)
+        ws_id = (entry.get("tab_id") or "").split(":")[0]
+        if ws_id:
+            result.setdefault(ws_id, []).append(entry)
+    return result
+
+
+def workspaces_in(snapshot_path, registry):
+    """控えのワークスペースごとに (名前, [(セッションID, 作業ディレクトリ)]) を返す"""
+    with open(snapshot_path) as f:
+        data = json.load(f)
+    result = []
+    for ws in data.get("workspaces", []):
+        name = ws.get("custom_name") or os.path.basename(ws.get("identity_cwd") or "") or ws["id"]
+        sessions = []
+        for tab in ws.get("tabs", []):
+            for pane in tab.get("panes", {}).values():
+                session_id = (pane.get("agent_session") or {}).get("value")
+                if session_id:
+                    sessions.append((session_id, pane.get("cwd")))
+        if not sessions:
+            for entry in registry.get(ws["id"], []):
+                sessions.append((entry["session_id"], entry.get("cwd")))
+        result.append((name, sessions))
+    return result
+
+
+def pick_snapshot(already_open, registry):
+    best, best_count = None, 0
+    paths = sorted(glob.glob(os.path.join(SNAPSHOT_DIR, "*.json")), key=os.path.getmtime, reverse=True)
+    for path in paths[:SNAPSHOT_LOOKBACK]:
+        count = sum(
+            1
+            for _, sessions in workspaces_in(path, registry)
+            for sid, _ in sessions
+            if sid not in already_open
+        )
+        if count > best_count:
+            best, best_count = path, count
+    return best
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] == ["--forget"] and len(args) == 2:
+        os.remove(os.path.join(REGISTRY_DIR, f"{args[1]}.json"))
+        return
+
+    dry_run = "--dry-run" in args
+    if os.environ.get("HERDR_ENV") != "1":
+        sys.exit("Herdr のペインの中で実行してください")
+
+    already_open = open_session_ids()
+    registry = registry_by_workspace()
+    if "--snapshot" in args:
+        snapshot = args[args.index("--snapshot") + 1]
+    else:
+        snapshot = pick_snapshot(already_open, registry)
+    if not snapshot:
+        print("開き直すセッションはありません")
+        return
+    print(f"控え: {snapshot}")
+
+    restored = 0
+    for name, sessions in workspaces_in(snapshot, registry):
+        targets = []
+        for session_id, pane_cwd in sessions:
+            if session_id in already_open:
+                continue
+            if os.path.exists(os.path.join(REGISTRY_DIR, "shelf", f"{session_id}.json")):
+                continue  # herdr-focus で棚に上げたもの
+            cwd = transcript_cwd(session_id)
+            if cwd is None:
+                print(f"飛ばした（会話の記録が無い）: {name} {session_id}")
+                continue
+            if not os.path.isdir(cwd):
+                print(f"飛ばした（作業ディレクトリが無い）: {name} {session_id} {cwd}")
+                continue
+            targets.append((session_id, cwd))
+        if not targets:
+            continue
+
+        print(f"[{name}]")
+        for session_id, cwd in targets:
+            print(f"  {session_id}  {cwd}")
+        if dry_run:
+            continue
+
+        created = herdr("workspace", "create", "--cwd", targets[0][1], "--label", name, "--no-focus")
+        pane_id = created["root_pane"]["pane_id"]
+        herdr("pane", "run", pane_id, f"cd {shlex.quote(targets[0][1])} && claude --resume {targets[0][0]}")
+        for session_id, cwd in targets[1:]:
+            split = herdr("pane", "split", pane_id, "--direction", "right", "--cwd", cwd, "--no-focus")
+            pane_id = split["pane"]["pane_id"]
+            herdr("pane", "run", pane_id, f"cd {shlex.quote(cwd)} && claude --resume {session_id}")
+        restored += 1
+
+    if not dry_run:
+        print(f"{restored} 個のワークスペースを開き直しました")
+
+
+if __name__ == "__main__":
+    main()
