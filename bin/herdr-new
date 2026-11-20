@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""新しい作業のワークスペースを作り、Claude を最初の依頼つきで起動する。
+
+  herdr-new NATSCREAF-249 [補足]   チケットに取り組む。依頼は「チケット <キー> に取り組みたい」
+  herdr-new !17894 [補足]          MR をレビューする。依頼は「MR !<番号> をレビューして」
+  herdr-new <自由文>               その文を依頼にする
+  herdr-new                        依頼を聞く（popup から呼ぶとき）
+
+worktree は作らない。ブランチ名・レビュー用の worktree の作り方はセッションの決まり
+（start-feature・EnterWorktree）に任せる。--worktree を付けたときだけ claude -w で作る。
+ワークスペース名は仮に付け、最初の応答のあとに名前付けフックが付け直す。
+
+端末から呼んだとき（herdr-pick の Ctrl-N など）は、起動の前に優先度とグループを聞く。
+セッションIDを先に決めて claude --session-id で渡し、その ID で herdr-focus と同じ置き場に書く。
+空のまま Enter なら付けない（優先度は「なし」）。
+質問は fzf で出し、Esc でいつでも取りやめる。取りやめたら何も作らず、終了コード 130 で終わる。
+--started <path> を渡すと、起動できたときにそのファイルを作る（herdr-pick が popup を閉じるかを決める）。
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import uuid
+
+# comicdev は ~/web-application、手元の Mac は ~/dev/spica/web-application
+REPO = next((p for p in map(os.path.expanduser, ("~/web-application", "~/dev/spica/web-application")) if os.path.isdir(p)),
+            os.path.expanduser("~/web-application"))
+TICKET = re.compile(r"[A-Z][A-Z0-9]{3,}-\d+")
+MR = re.compile(r"!?(\d+)")
+LABEL_CHARS = 18
+STATE_DIR = os.path.expanduser("~/.claude/herdr-sessions")
+PRIORITIES = ["高", "中", "低"]
+
+
+def herdr(*args):
+    result = subprocess.run(["herdr", *args], capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        sys.exit(f"herdr {' '.join(args[:2])} に失敗しました: {result.stdout or result.stderr}")
+    # pane run は成功しても何も出力しない
+    return json.loads(result.stdout)["result"] if result.stdout.strip() else None
+
+
+def plan(words):
+    """引数から ワークスペースの仮の名前・セッション名・最初の依頼 を作る。"""
+    head, rest = words[0], " ".join(words[1:])
+    if TICKET.fullmatch(head):
+        prompt = f"チケット {head} に取り組みたい。{rest}" if rest else f"チケット {head} に取り組みたい"
+        return head, head.lower(), prompt
+    match = MR.fullmatch(head)
+    if match:
+        iid = match.group(1)
+        prompt = f"MR !{iid} をレビューして。{rest}" if rest else f"MR !{iid} をレビューして"
+        return f"!{iid}", f"review-mr-{iid}", prompt
+    text = " ".join(words)
+    return text[:LABEL_CHARS], None, text
+
+
+def existing_groups():
+    """herdr-pick と同じく group-order.json の順。セッションにだけ付いているものは後ろに足す。"""
+    try:
+        with open(os.path.join(STATE_DIR, "group-order.json")) as f:
+            saved = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        saved = []
+    return saved + [g for g in group_names() if g not in saved]
+
+
+def group_names():
+    names = set()
+    group_dir = os.path.join(STATE_DIR, "group")
+    for name in os.listdir(group_dir) if os.path.isdir(group_dir) else []:
+        with open(os.path.join(group_dir, name)) as f:
+            names.add(f.read().strip())
+    return sorted(n for n in names if n)
+
+
+CANCELLED = 130
+NONE_CHOICE = "なし"
+
+
+def ask(prompt, choices=(), hint=""):
+    """fzf で1つ聞く。選んだ項目か、合う項目が無ければ打った文字を返す。Esc で取りやめる。"""
+    header = "Esc 取りやめ" + (f"  {hint}" if hint else "")
+    result = subprocess.run(
+        ["fzf", "--print-query", "--no-sort", "--reverse", f"--prompt={prompt}> ",
+         f"--header={header}", "--bind=tab:print-query"],
+        input="\n".join(choices), stdout=subprocess.PIPE, text=True,
+    )
+    if result.returncode == CANCELLED:
+        sys.exit(CANCELLED)
+    lines = result.stdout.split("\n")
+    query, picked = lines[0].strip(), (lines[1].strip() if len(lines) > 1 else "")
+    return picked or query
+
+
+def ask_priority_and_group():
+    """(優先度, グループ) を聞く。付けないものは空文字。"""
+    priority = ask("優先度", [NONE_CHOICE, *PRIORITIES])
+    group = ask("グループ", [NONE_CHOICE, *existing_groups()], "新しい名前は打って Tab")
+    return ("" if priority not in PRIORITIES else priority), ("" if group == NONE_CHOICE else group)
+
+
+def save(kind, session_id, value):
+    if not value:
+        return
+    os.makedirs(os.path.join(STATE_DIR, kind), exist_ok=True)
+    with open(os.path.join(STATE_DIR, kind, session_id), "w") as f:
+        f.write(value)
+
+
+def main():
+    args = sys.argv[1:]
+    dry_run = "--dry-run" in args
+    worktree = "--worktree" in args
+    started = None
+    if "--started" in args:
+        i = args.index("--started")
+        started = args[i + 1]
+        args = args[:i] + args[i + 2:]
+    words = [a for a in args if a not in ("--dry-run", "--worktree")]
+    if not words:
+        if not sys.stdin.isatty():
+            return
+        words = ask("課題キー・MR番号・依頼").split()
+        if not words:
+            return
+
+    label, name, prompt = plan(words)
+    priority, group = ("", "")
+    if sys.stdin.isatty():
+        priority, group = ask_priority_and_group()
+    session_id = str(uuid.uuid4())
+    command = ["claude", "--session-id", session_id]
+    if name:
+        command += ["-n", name]
+    if worktree:
+        command += ["-w", name or "work"]
+    command.append(prompt)
+    line = shlex.join(command)
+
+    if dry_run:
+        print(f"ワークスペース名（仮）: {label}\n優先度: {priority or 'なし'}  グループ: {group or 'なし'}\n起動: {line}")
+        return
+
+    save("priority", session_id, priority)
+    save("group", session_id, group)
+
+    created = herdr("workspace", "create", "--cwd", REPO, "--label", label, "--focus")
+    herdr("pane", "run", created["root_pane"]["pane_id"], line)
+    print(f"{created['workspace']['number']}:{label} で起動しました")
+    if started:
+        open(started, "w").close()
+
+
+if __name__ == "__main__":
+    main()

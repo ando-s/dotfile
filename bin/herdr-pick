@@ -1,0 +1,582 @@
+#!/usr/bin/env python3
+"""Herdr の Claude ペインを fzf で選び、そのペインへ移る。
+
+並び順は自分の操作でしか変わらない。状態や更新時刻では並べ替えない。
+  グループ（自分で決めた順。決めていないものは名前の順で後ろ）→ グループなし → 使ってない の順に見出しを出し、
+  その中は 優先度（高・中・低・なし）→ ワークスペースの番号 の順。使ってないものは使ってないにした順。
+  グループを1つも付けていなければ見出しは出さない
+列は 未読（herdr が未読としている応答に ⬤）・優先度・状態・名前・チケット（課題キー）・MR（MR番号）・経過（最後の依頼から）・最後の依頼。
+見出しの最後の行に列名を出し、縦線の位置を揃える。
+
+優先度とグループはセッションごとに ~/.claude/herdr-sessions/priority/ と group/ に持つ。
+使ってないにしても残り、開き直すと元に戻る。herdr-done で閉じると消える。
+
+  Enter   移る（使ってないなら開き直す）
+  Ctrl-T  優先度を なし→高→中→低→なし の順に変える。自分で付けていないものは「なし」
+  Ctrl-S  使ってないにする・開き直す。使ってないにするときは、先にそのセッションへ「ここまでの結論と
+          残りの作業を記録先に書いて」と頼み、書き終わってから閉じる。書いている間は「保存中」と出る
+  Ctrl-G  グループを付ける・外す。番号で今あるグループを選ぶか、新しい名前を打つ
+  Alt-↑↓  グループの順番を1つ上・下へ動かす。見出しの上でも、そのグループのセッションの上でもよい
+グループはセッションが0件になっても残り、見出しに（0）と出る。消すのはグループの見出しの上の Ctrl-D だけ。
+中のセッションは閉じず、グループなしになる
+  Ctrl-R  名前を変える。開いているものは目的として固定し、ゴールは名前付けフックが付け直す。
+          グループの見出しの上ならグループの名前を変える
+  Ctrl-D  片付ける。開いているものは herdr-done で閉じ、使ってないものは一覧から消す。
+          グループの見出しの上ならグループを消す
+  Ctrl-N  新しい作業を始める（herdr-new）。途中の Esc で取りやめると一覧に戻る
+  Ctrl-W  worktree を掃除する Claude を新しいワークスペースで起動する
+
+軽くするため、プレビューは出さない。
+
+見出しに worktree の数と、マージ済みで変更の無い数を出す。数えるのに十数秒かかるため、
+1時間に1回、裏で数えて ~/.claude/herdr-sessions/worktree-status.json に置き、見出しはそれを読む。
+
+  herdr-pick            開く
+  herdr-pick --list     一覧を出すだけ
+"""
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+import unicodedata
+
+LABEL_DIR = os.path.expanduser("~/.claude/herdr-sessions/labels")
+MAIN_DIR = os.path.expanduser("~/.claude/herdr-sessions/main")  # 前の「メイン」の印。優先度「高」とみなす
+PRIORITY_DIR = os.path.expanduser("~/.claude/herdr-sessions/priority")
+PRIORITIES = ["高", "中", "低"]
+GROUP_DIR = os.path.expanduser("~/.claude/herdr-sessions/group")
+GROUP_ORDER = os.path.expanduser("~/.claude/herdr-sessions/group-order.json")
+NO_GROUP = "グループなし"
+SHELF_SECTION = "使ってない"
+HEADING_COLOR = "\033[1;38;2;235;203;139m"  # 太字の黄
+SHELF_DIR = os.path.expanduser("~/.claude/herdr-sessions/shelf")
+REGISTRY_DIR = os.path.expanduser("~/.claude/herdr-sessions")
+PENDING_DIR = os.path.join(REGISTRY_DIR, "shelf-pending")
+LABEL_HOOK = os.path.expanduser("~/.claude/hooks/herdr-workspace-label.py")
+WORKTREE_STATUS = os.path.join(REGISTRY_DIR, "worktree-status.json")
+WORKTREE_SCAN_SECONDS = 3600
+WORKTREE_WARN = 10
+# comicdev は ~/web-application、手元の Mac は ~/dev/spica/web-application
+REPO = next((p for p in map(os.path.expanduser, ("~/web-application", "~/dev/spica/web-application")) if os.path.isdir(p)),
+            os.path.expanduser("~/web-application"))
+FOCUS = os.path.expanduser("~/bin/herdr-focus")
+NEW = os.path.expanduser("~/bin/herdr-new")
+DONE = os.path.expanduser("~/bin/herdr-done")
+# ★ は端末によって幅が変わり縦線がずれるため、言葉だけにする
+GROUP_NAMES = ["高", "中", "低", "なし", "使ってない"]
+PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
+# 状態は絵文字ではなく言葉で出す
+STATUS_TEXT = {"blocked": "要対応", "done": "応答あり", "idle": "待機中", "working": "作業中"}
+# 状態の文字の色。テーマ nord の色。herdr のサイドバーの色と対応しているかは未確認で、違えばここを直す
+STATUS_COLOR = {
+    "要対応": "#BF616A",  # 赤
+    "作業中": "#EBCB8B",  # 黄
+    "応答あり": "#A3BE8C",  # 緑
+    "待機中": "#81A1C1",  # 青
+    "保存中": "#B48EAD",  # 紫
+    # 優先度の色。状態の色と見分けがつくよう、別の色にする
+    "高": "#D08770",  # 橙
+    "中": "#88C0D0",  # 水色
+    "低": "#616E88",  # 灰
+}
+
+
+def colored(text, plain):
+    """plain の色で text を塗る。text は幅を揃えたあとの文字列。"""
+    color = STATUS_COLOR.get(plain)
+    if not color:
+        return text
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return f"\033[38;2;{r};{g};{b}m{text}\033[0m"
+TAIL_BYTES = 400_000
+SKIP_PREFIXES = ("<", "[Request interrupted", "This session is being continued")
+PROMPT_CHARS = 70
+
+
+def herdr(*args):
+    out = subprocess.run(["herdr", *args], capture_output=True, text=True, timeout=5).stdout
+    return json.loads(out)["result"]
+
+
+def label_state(session_id):
+    try:
+        with open(os.path.join(LABEL_DIR, f"{session_id}.txt")) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def user_text(entry):
+    if entry.get("type") != "user" or entry.get("isMeta") or entry.get("isSidechain"):
+        return None
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+    if not isinstance(content, str):
+        return None
+    text = " ".join(content.split())
+    if not text or text.startswith(SKIP_PREFIXES):
+        return None
+    return text
+
+
+def last_prompt(session_id):
+    """会話記録の末尾から最後の依頼と、その記録の更新時刻を返す。"""
+    paths = glob.glob(os.path.join(PROJECTS_DIR, "*", f"{session_id}.jsonl"))
+    if not paths:
+        return "", None
+    path = max(paths, key=os.path.getmtime)
+    size = os.path.getsize(path)
+    # 末尾だけで見つからなければ全体を読む。長い会話でも数MBに収まる
+    for start in (max(0, size - TAIL_BYTES), 0):
+        with open(path, "rb") as f:
+            f.seek(start)
+            lines = f.read().decode("utf-8", "replace").splitlines()
+        for line in reversed(lines):
+            try:
+                text = user_text(json.loads(line))
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if text:
+                return text, os.path.getmtime(path)
+        if start == 0:
+            break
+    return "", os.path.getmtime(path)
+
+
+def age(mtime):
+    if mtime is None:
+        return "   -"
+    minutes = int((time.time() - mtime) / 60)
+    if minutes < 60:
+        return f"{minutes:3d}分"
+    if minutes < 60 * 24:
+        return f"{minutes // 60:3d}時"
+    return f"{minutes // 1440:3d}日"
+
+
+def width_of(text):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def pad(text, width):
+    """全角を2桁として数え、幅に収まらなければ「…」で切り、表示の幅を揃える。"""
+    # 切ったしるしは ASCII の ".." にする。「…」は端末によって1桁にも2桁にもなり、縦線がずれるため
+    if width_of(text) > width:
+        while text and width_of(text) > width - 2:
+            text = text[:-1]
+        text += ".."
+    return text + " " * max(0, width - width_of(text))
+
+
+# 未読のしるし。herdr は応答を見るまで状態を done にし、見ると idle に戻す。
+# 幅が端末で変わらない（East Asian Width が N の）丸を使う。● と ★ は端末によって2桁になり縦線がずれる
+UNREAD_MARK = "\u2b24"
+
+# 列: (見出し, 幅)。最後の列は幅を決めない
+COLUMNS = [("未読", 4), ("優先度", 10), ("状態", 8), ("名前", 60), ("チケット", 15), ("MR", 7), ("経過", 5), ("最後の依頼", None)]
+SEPARATOR = " │ "
+
+
+JIRA_URL = "https://comicfesta.atlassian.net/browse/{}"
+MR_URL = "https://gitlab.wwwave.info/comic-festa-group/web-application/-/merge_requests/{}"
+
+
+def link(text, ref):
+    """課題キーは JIRA、!番号は MR へのリンクにする（OSC 8）。クリックで開くかは端末による。"""
+    if not ref:
+        return text
+    url = MR_URL.format(ref[1:]) if ref.startswith("!") else JIRA_URL.format(ref)
+    stripped = text.rstrip()
+    return f"\033]8;;{url}\033\\{stripped}\033]8;;\033\\" + text[len(stripped):]
+
+
+def format_row(values, header=False):
+    cells = [pad(v, w) if w else v for v, (_, w) in zip(values, COLUMNS)]
+    if not header:
+        cells[0] = colored(cells[0], "応答あり")
+        cells[1] = colored(cells[1], values[1])
+        cells[2] = colored(cells[2], values[2])
+        cells[4] = link(cells[4], values[4])
+        cells[5] = link(cells[5], values[5])
+    return SEPARATOR.join(cells)
+
+
+def group_of(session):
+    """優先度の並び順。高=0・中=1・低=2・なし=3。自分で付けていないものは「なし」。"""
+    if not session:
+        return 3
+    try:
+        with open(os.path.join(PRIORITY_DIR, session)) as f:
+            value = f.read().strip()
+        if value in PRIORITIES:
+            return PRIORITIES.index(value)
+    except OSError:
+        pass
+    return 0 if os.path.exists(os.path.join(MAIN_DIR, session)) else 3
+
+
+def group_name(session):
+    try:
+        with open(os.path.join(GROUP_DIR, session)) as f:
+            return f.read().strip()
+    except (OSError, TypeError):
+        return ""
+
+
+def all_groups():
+    names = set()
+    for path in glob.glob(os.path.join(GROUP_DIR, "*")):
+        with open(path) as f:
+            names.add(f.read().strip())
+    return sorted(n for n in names if n)
+
+
+def ordered_groups():
+    """自分で決めた順のグループ。group-order.json がグループの一覧を兼ね、セッションが0件のグループも残す。
+    セッションにだけ付いていて一覧に無いものは、名前の順で後ろに足して一覧に書く。"""
+    try:
+        with open(GROUP_ORDER) as f:
+            saved = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        saved = []
+    added = [g for g in all_groups() if g not in saved]
+    if added:
+        saved = saved + added
+        save_group_order(saved)
+    return saved
+
+
+def save_group_order(order):
+    tmp = GROUP_ORDER + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(order, f, ensure_ascii=False)
+    os.replace(tmp, GROUP_ORDER)
+
+
+def section_of(group, order):
+    """見出しの並び。グループ（決めた順）→ グループなし → 使ってない。"""
+    return (0, order.index(group), group) if group in order else (1, 0, "")
+
+
+def move_group(direction, kind, group_field, session):
+    """グループを1つ上か下へ動かし、fzf に読み直しと、今の行へのカーソルの移し先を返す。"""
+    name = group_field if kind == "heading" else group_name(session)
+    order = ordered_groups()
+    if name in order:
+        i = order.index(name)
+        j = i - 1 if direction == "up" else i + 1
+        if 0 <= j < len(order):
+            order[i], order[j] = order[j], order[i]
+            save_group_order(order)
+    listed = rows()
+    position = next((n for n, r in enumerate(listed, 1)
+                     if (kind == "heading" and r[1] == "heading" and r[4] == name)
+                     or (kind != "heading" and session and r[5] == session)), 1)
+    me = os.path.abspath(__file__)
+    return f"reload-sync({me} --list)+pos({position})"
+
+
+def heading(title, count):
+    return f"{HEADING_COLOR}── {title}（{count}） ──\033[0m"
+
+
+def rows():
+    """(並び順, 種類, ペインID, タブID, ワークスペースID, セッションID, 表示) を返す。
+    見出しの行は種類 heading で、ワークスペースIDの欄にグループ名を入れる。"""
+    workspaces = {w["workspace_id"]: w for w in herdr("workspace", "list")["workspaces"]}
+    order = ordered_groups()
+    result = []
+    for pane in herdr("pane", "list")["panes"]:
+        session = (pane.get("agent_session") or {}).get("value")
+        if not pane.get("agent"):
+            continue
+        status = pane.get("agent_status", "unknown")
+        prompt, mtime = last_prompt(session) if session else ("", None)
+        ws = workspaces.get(pane["workspace_id"], {})
+        state = label_state(session) if session else {}
+        ticket = (state.get("ticket") or {}).get("key") or ""
+        mr = f"!{state['mr']['iid']}" if (state.get("mr") or {}).get("iid") else ""
+        # ペインが1つならワークスペースの名前を出す。手で付け直した名前がすぐ見えるように。
+        # 複数のペインがあるときは見分けられるよう、セッションごとの名前を出す
+        if ws.get("pane_count") == 1 and ws.get("label"):
+            name = ws["label"]
+        else:
+            name = state.get("label") or pane.get("terminal_title_stripped") or ws.get("label", "")
+        group = group_of(session)
+        line = format_row([
+            UNREAD_MARK if status == "done" else "",
+            GROUP_NAMES[group],
+            "保存中" if session and os.path.exists(os.path.join(PENDING_DIR, session))
+            else STATUS_TEXT.get(status, "不明"),
+            name,
+            ticket,
+            mr,
+            age(mtime).strip(),
+            prompt[:PROMPT_CHARS],
+        ])
+        # 状態や更新時刻では並べ替えない。自分で決めた種類と、ワークスペースの番号（サイドバーの並び）で並べる
+        sort_key = (section_of(group_name(session), order), group, ws.get("number", 999), pane["pane_id"])
+        result.append((sort_key, "open", pane["pane_id"], pane["tab_id"], pane["workspace_id"], session or "", line))
+    for path in glob.glob(os.path.join(SHELF_DIR, "*.json")):
+        with open(path) as f:
+            entry = json.load(f)
+        prompt, mtime = last_prompt(entry["session_id"])
+        line = format_row([
+            "",
+            GROUP_NAMES[4],
+            "閉じた",
+            entry.get("label") or entry["session_id"][:8],
+            "" if (entry.get("ref") or "").startswith("!") else entry.get("ref") or "",
+            entry.get("ref") if (entry.get("ref") or "").startswith("!") else "",
+            age(mtime).strip(),
+            prompt[:PROMPT_CHARS],
+        ])
+        result.append((((2, 0, ""), 4, entry.get("shelved_at", ""), entry["session_id"]),
+                       "shelf", "-", "-", "-", entry["session_id"], line))
+    if not order:
+        return sorted(result)
+    counts = {}
+    for entry in result:
+        counts[entry[0][0]] = counts.get(entry[0][0], 0) + 1
+    for i, name in enumerate(order):
+        counts.setdefault((0, i, name), 0)
+    for section, count in counts.items():
+        title = section[2] or (NO_GROUP if section[0] == 1 else SHELF_SECTION)
+        result.append(((section, -1), "heading", "-", "-", section[2] or "-", "", heading(title, count)))
+    return sorted(result)
+
+
+def scan_worktrees():
+    """マージ済み（origin/master の祖先）で変更の無い worktree を数え、結果を置く。"""
+    from concurrent.futures import ThreadPoolExecutor
+    out = subprocess.run(["git", "-C", REPO, "worktree", "list", "--porcelain"], capture_output=True, text=True).stdout
+    paths = [l.split(" ", 1)[1] for l in out.splitlines() if l.startswith("worktree ")][1:]
+
+    def cleanable(path):
+        if not os.path.isdir(path):
+            return True
+        head = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        merged = subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", head, "origin/master"]).returncode == 0
+        if not merged:
+            return False
+        return not subprocess.run(["git", "-C", path, "status", "--porcelain"], capture_output=True, text=True).stdout
+
+    with ThreadPoolExecutor(8) as pool:
+        count = sum(pool.map(cleanable, paths))
+    tmp = WORKTREE_STATUS + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"checked_at": time.time(), "total": len(paths), "cleanable": count}, f)
+    os.replace(tmp, WORKTREE_STATUS)
+
+
+def worktree_status():
+    """置いてある結果を返し、古ければ裏で数え直す。"""
+    try:
+        with open(WORKTREE_STATUS) as f:
+            status = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        status = None
+    if not status or time.time() - status["checked_at"] > WORKTREE_SCAN_SECONDS:
+        subprocess.Popen([os.path.abspath(__file__), "--scan-worktrees"], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return status
+
+
+def header():
+    """操作・状態の意味・worktree の警告を、項目ごとに1行ずつ出す。最後に列名を出す。"""
+    keys = "  ".join([
+        "Enter 移る", "^T 優先度（なし→高→中→低）", "^G グループ", "Alt-↑↓ グループの順番", "^S 使ってないにする・戻す", "^R 名前変更",
+        "^D 片付け", "^N 新しい作業", "^W worktree掃除",
+    ])
+    states = "  ".join(
+        f"{colored(word, word)} {meaning}" for word, meaning in [
+            ("要対応", "許可・入力待ち"),
+            ("応答あり", "未確認の応答"),
+            ("待機中", "次の依頼待ち"),
+            ("作業中", "応答中"),
+            ("保存中", "閉じる前に記録中"),
+            ("閉じた", "使ってない"),
+        ]
+    )
+    lines = [f"操作  {keys}", f"状態  {states}"]
+    status = worktree_status()
+    if status and status["total"] >= WORKTREE_WARN:
+        lines.append(f"注意  ⚠ worktree {status['total']} 本（掃除できるもの {status['cleanable']} 本） → ^W で掃除")
+    lines.append("")
+    lines.append(format_row([name for name, _ in COLUMNS], header=True))
+    return "\n".join(lines)
+
+
+def discard(kind, workspace_id, session):
+    """開いているものは herdr-done で閉じ、使ってないものは一覧から消す。グループの見出しならグループを消す。"""
+    if kind == "heading":
+        if workspace_id != "-":
+            delete_group(workspace_id)
+        return
+    if kind == "open":
+        subprocess.run([DONE, workspace_id])
+    else:
+        prompt, _ = last_prompt(session)
+        print(f"使ってないの一覧から消します。会話の記録は消しません\n  {session}\n  {prompt[:80]}")
+        if input("消しますか？ [y/N] ").strip().lower() in ("y", "yes"):
+            for path in (os.path.join(SHELF_DIR, f"{session}.json"), os.path.join(REGISTRY_DIR, f"{session}.json"),
+                         os.path.join(PRIORITY_DIR, session), os.path.join(GROUP_DIR, session)):
+                if os.path.exists(path):
+                    os.remove(path)
+            return
+    input("Enter で一覧に戻ります")
+
+
+def rename(kind, workspace_id, session):
+    """開いているものは名前付けフックの --set-purpose で目的を固定して付け直す。
+    フックの記録が無いセッションはワークスペースの名前を直接変える。使ってないものは記録の名前を変える。"""
+    try:
+        name = input("新しい名前（空なら変えない）> ").strip()
+    except EOFError:
+        return
+    if not name:
+        return
+    if kind == "heading":
+        if workspace_id == "-":
+            return
+        # 名前を書き換える前に順番を読む。書き換えたあとは前の名前がグループとして見つからない
+        order = ordered_groups()
+        for path in glob.glob(os.path.join(GROUP_DIR, "*")):
+            with open(path) as f:
+                if f.read().strip() != workspace_id:
+                    continue
+            with open(path, "w") as f:
+                f.write(name)
+        save_group_order([name if g == workspace_id else g for g in order])
+    elif kind == "shelf":
+        path = os.path.join(SHELF_DIR, f"{session}.json")
+        with open(path) as f:
+            entry = json.load(f)
+        entry["label"] = name
+        with open(path, "w") as f:
+            json.dump(entry, f, ensure_ascii=False)
+    elif session and label_state(session).get("pane_id"):
+        subprocess.run([sys.executable, LABEL_HOOK, "--set-purpose", session, name], capture_output=True)
+    else:
+        herdr("workspace", "rename", workspace_id, name)
+
+
+def delete_group(name):
+    """グループを消す。中のセッションは閉じず、グループなしにする。"""
+    members = []
+    for path in glob.glob(os.path.join(GROUP_DIR, "*")):
+        with open(path) as f:
+            if f.read().strip() == name:
+                members.append(path)
+    print(f"グループ「{name}」を消します。中のセッション {len(members)} 件は閉じず、グループなしにします")
+    try:
+        answer = input("消しますか？ [y/N] ").strip().lower()
+    except EOFError:
+        return
+    if answer not in ("y", "yes"):
+        return
+    for path in members:
+        os.remove(path)
+    save_group_order([g for g in ordered_groups() if g != name])
+
+
+def set_group(kind, session):
+    """今あるグループを番号で選ぶか、新しい名前を打つ。- で外す。"""
+    if kind == "heading" or not session:
+        return
+    groups = ordered_groups()
+    current = group_name(session)
+    print(f"今のグループ: {current or NO_GROUP}")
+    for i, name in enumerate(groups, 1):
+        print(f"  {i}. {name}")
+    try:
+        answer = input("番号か新しい名前（- で外す・空なら変えない）> ").strip()
+    except EOFError:
+        return
+    if not answer:
+        return
+    path = os.path.join(GROUP_DIR, session)
+    if answer == "-":
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    if answer.isdigit() and 1 <= int(answer) <= len(groups):
+        answer = groups[int(answer) - 1]
+    os.makedirs(GROUP_DIR, exist_ok=True)
+    with open(path, "w") as f:
+        f.write(answer)
+    ordered_groups()  # 新しいグループを一覧に載せる
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] == ["--scan-worktrees"]:
+        scan_worktrees()
+        return
+    if args[:1] == ["--header"]:
+        print(header())
+        return
+    if args[:1] == ["--discard"]:
+        discard(*args[1:4])
+        return
+    if args[:1] == ["--rename"]:
+        rename(*args[1:4])
+        return
+    if args[:1] == ["--after-new"]:
+        # herdr-new が起動できていれば popup を閉じ、取りやめていれば一覧を読み直す
+        if os.path.exists(args[1]):
+            os.remove(args[1])
+            print("abort")
+        else:
+            print(f"reload({os.path.abspath(__file__)} --list)")
+        return
+    if args[:1] == ["--move-group"]:
+        print(move_group(*args[1:5]))
+        return
+    if args[:1] == ["--group"]:
+        set_group(*args[1:3])
+        return
+    if args[:1] == ["--list"]:
+        for entry in rows():
+            print("\t".join(entry[1:]))
+        return
+
+    me = os.path.abspath(__file__)
+    started = f"/tmp/herdr-new-started-{os.getpid()}"
+    refresh = f"reload({me} --list)+transform-header({me} --header)"
+    picked = subprocess.run(
+        [
+            "fzf", "--ansi", "--delimiter=\t", "--with-nth=6", "--no-sort", "--reverse",
+            "--prompt=セッション> ",
+            f"--header={header()}",
+            f"--bind=start:reload({me} --list)",
+            f"--bind=ctrl-t:execute-silent([ {{1}} = heading ] || {FOCUS} priority-session {{5}})+{refresh}",
+            f"--bind=ctrl-s:execute-silent([ {{1}} = heading ] || {{ [ {{1}} = shelf ] && {FOCUS} unshelve {{5}} || {FOCUS} save-and-shelve {{5}}; }})+{refresh}",
+            f"--bind=ctrl-g:execute({me} --group {{1}} {{5}})+{refresh}",
+            f"--bind=alt-up:transform({me} --move-group up {{1}} {{4}} {{5}})",
+            f"--bind=alt-down:transform({me} --move-group down {{1}} {{4}} {{5}})",
+            f"--bind=ctrl-r:execute({me} --rename {{1}} {{4}} {{5}})+{refresh}",
+            f"--bind=ctrl-d:execute({me} --discard {{1}} {{4}} {{5}})+{refresh}",
+            # 起動できたら閉じ、取りやめたら一覧に戻る
+            f"--bind=ctrl-n:execute({NEW} --started {started})+transform({me} --after-new {started})",
+            f"--bind=ctrl-w:execute-silent({NEW} worktree を掃除して)+abort",
+        ],
+        input="", stdout=subprocess.PIPE, text=True,
+    ).stdout.strip()
+    if not picked:
+        return
+    kind, pane_id, tab_id, workspace_id, session = picked.split("\t")[:5]
+    if kind == "heading":
+        return
+    if kind == "shelf":
+        subprocess.run([FOCUS, "unshelve", session])
+        return
+    herdr("workspace", "focus", workspace_id)
+    herdr("tab", "focus", tab_id)
+
+
+if __name__ == "__main__":
+    main()

@@ -17,6 +17,7 @@ dotfile/
 │   ├── hooks/        # ~/.claude/hooks/ に symlink される
 │   ├── docs/         # ワークフロー説明（人間向け）
 │   └── templates/    # プロジェクトにコピーして使う雛形（install.sh では入れない）
+├── bin/          # ~/bin/ に symlink される（Herdr のセッション操作 herdr-pick など。Mac と comicdev で共通）
 ├── tmux/
 │   └── .tmux.conf    # ~/.tmux.conf に symlink される（最後に ~/.tmux.local.conf を読む）
 └── install.sh        # symlink セットアップ（idempotent）

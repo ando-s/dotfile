@@ -176,5 +176,25 @@ if [ -f "$tmux_src" ]; then
   fi
 fi
 
+echo "==> Installing bin"
+mkdir -p "$HOME/bin"
+for script in "$DOTFILE_DIR/bin/"*; do
+  name=$(basename "$script")
+  target="$HOME/bin/$name"
+  if [ -L "$target" ]; then
+    current=$(readlink "$target")
+    if [ "$current" = "$script" ]; then
+      echo "  [ok] $name (already linked)"
+    else
+      echo "  [WARN] $name -> $current (different target, leaving alone)"
+    fi
+  elif [ -e "$target" ]; then
+    echo "  [WARN] $name exists as non-symlink, leaving alone"
+  else
+    ln -s "$script" "$target"
+    echo "  [link] $name"
+  fi
+done
+
 echo ""
 echo "Done. Restart Claude Code to pick up new skills/agents/CLAUDE.md."

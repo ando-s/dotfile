@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""終わった作業のワークスペースを閉じ、後片付けをする。
+
+  1. ワークスペースのペイン・セッション・worktree を見せ、閉じてよいかを聞く
+  2. セッションを ~/.claude/herdr-sessions/ の一覧から外す。herdr-restore で開き直されないようにする
+  3. ワークスペースを閉じる
+  4. worktree がマージ済みで未コミットの変更が無ければ、消すかを聞く。そうでなければ理由を出して残す
+     ブランチは消さない
+
+  herdr-done [<workspace_id>]   既定は今のワークスペース
+  herdr-done --gc               一覧の古い記録だけを消す（今のペインに無く、7日以上更新の無いもの）
+"""
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+REGISTRY_DIR = os.path.expanduser("~/.claude/herdr-sessions")
+GC_DAYS = 7
+
+
+def herdr(*args):
+    out = subprocess.run(["herdr", *args], capture_output=True, text=True, timeout=10).stdout
+    try:
+        return json.loads(out).get("result") or {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def git(cwd, *args):
+    result = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=60)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def ask(question, default=False):
+    suffix = " [Y/n] " if default else " [y/N] "
+    try:
+        answer = input(question + suffix).strip().lower()
+    except EOFError:
+        return False
+    return default if not answer else answer in ("y", "yes")
+
+
+def live_session_ids():
+    return {
+        (p.get("agent_session") or {}).get("value")
+        for p in herdr("pane", "list").get("panes", [])
+    } - {None}
+
+
+def gc():
+    """今のペインに無く、GC_DAYS 日以上更新の無い記録を消す。定時停止のあとの開き直しに要る記録は残る。"""
+    live = live_session_ids()
+    limit = time.time() - GC_DAYS * 86400
+    removed = []
+    for path in glob.glob(os.path.join(REGISTRY_DIR, "*.json")):
+        session_id = os.path.basename(path)[:-5]
+        if session_id not in live and os.path.getmtime(path) < limit:
+            os.remove(path)
+            removed.append(session_id)
+    return removed
+
+
+def linked_worktree(cwd):
+    """cwd が master 以外の git worktree の中なら、その根のパスを返す。"""
+    if not cwd or not os.path.isdir(cwd):
+        return None
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    git_dir = git(cwd, "rev-parse", "--absolute-git-dir")
+    common = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not top or not git_dir or git_dir == common:
+        return None
+    return top
+
+
+def merged(worktree, branch):
+    head = git(worktree, "rev-parse", "HEAD")
+    git(worktree, "fetch", "-q", "origin", "master")
+    if head and git(worktree, "merge-base", "--is-ancestor", head, "origin/master") is not None:
+        return True
+    if not branch:
+        return False
+    # squash でマージした MR は祖先にならないため、GitLab に聞く
+    result = subprocess.run(
+        ["glab", "mr", "list", "--merged", "--source-branch", branch, "-F", "json"],
+        cwd=worktree, capture_output=True, text=True, timeout=30,
+    )
+    try:
+        return result.returncode == 0 and len(json.loads(result.stdout or "[]")) > 0
+    except json.JSONDecodeError:
+        return False
+
+
+def main():
+    if sys.argv[1:] == ["--gc"]:
+        removed = gc()
+        print(f"一覧から {len(removed)} 件を消しました" + "".join(f"\n  {s}" for s in removed))
+        return
+
+    workspace_id = (sys.argv[1] if len(sys.argv) > 1
+                    else os.environ.get("HERDR_ACTIVE_WORKSPACE_ID")
+                    # HERDR_WORKSPACE_ID はペインを移しても変わらないため、herdr に今のペインを聞く
+                    or herdr("pane", "current").get("pane", {}).get("workspace_id"))
+    if not workspace_id:
+        sys.exit("ワークスペースIDを指定してください")
+    workspace = herdr("workspace", "get", workspace_id).get("workspace")
+    if not workspace:
+        sys.exit(f"ワークスペース {workspace_id} が見つかりません")
+
+    panes = [p for p in herdr("pane", "list").get("panes", []) if p["workspace_id"] == workspace_id]
+    sessions = [(p.get("agent_session") or {}).get("value") for p in panes]
+    sessions = [s for s in sessions if s]
+    worktrees = sorted({w for w in (linked_worktree(p.get("foreground_cwd") or p.get("cwd")) for p in panes) if w})
+
+    print(f"ワークスペース: {workspace['number']}:{workspace['label']}")
+    for p in panes:
+        print(f"  ペイン {p['pane_id']}  {p.get('agent') or 'shell'}  {p.get('agent_status', '')}  {p.get('foreground_cwd') or p.get('cwd')}")
+    for w in worktrees:
+        print(f"  worktree {w}")
+    working = [p["pane_id"] for p in panes if p.get("agent_status") == "working"]
+    if working:
+        print(f"作業中のペインがあります: {', '.join(working)}")
+    if not ask("閉じますか？"):
+        print("やめました")
+        return
+
+    for session_id in sessions:
+        for path in (os.path.join(REGISTRY_DIR, f"{session_id}.json"),
+                     os.path.join(REGISTRY_DIR, "main", session_id),
+                     os.path.join(REGISTRY_DIR, "priority", session_id),
+                     os.path.join(REGISTRY_DIR, "group", session_id),
+                     os.path.join(REGISTRY_DIR, "shelf", f"{session_id}.json")):
+            if os.path.exists(path):
+                os.remove(path)
+    herdr("workspace", "close", workspace_id)
+    print(f"閉じました。一覧から {len(sessions)} 件のセッションを外しました")
+
+    for worktree in worktrees:
+        branch = git(worktree, "symbolic-ref", "--short", "-q", "HEAD")
+        changes = git(worktree, "status", "--porcelain") or ""
+        if changes:
+            print(f"残します（未コミットの変更 {len(changes.splitlines())} 件）: {worktree}")
+            continue
+        if not merged(worktree, branch):
+            print(f"残します（マージされていない）: {worktree}  {branch or '(detached)'}")
+            continue
+        if ask(f"マージ済みです。worktree を消しますか？ {worktree}", default=True):
+            main_repo = os.path.dirname(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+            result = subprocess.run(["git", "-C", main_repo, "worktree", "remove", worktree],
+                                    capture_output=True, text=True)
+            print("消しました" if result.returncode == 0 else f"消せませんでした: {result.stderr.strip()}")
+
+    removed = gc()
+    if removed:
+        print(f"一覧の古い記録を {len(removed)} 件消しました")
+
+
+if __name__ == "__main__":
+    main()
