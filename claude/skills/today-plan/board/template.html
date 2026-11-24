@@ -1,0 +1,202 @@
+<title>今日のボード</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 左に1日の時間の帯、右に状態ごとの列。上に今の時点の進み具合 */
+:root {
+  --bg: #f3f5f4;
+  --panel: #ffffff;
+  --ink: #18211f;
+  --muted: #5d6b67;
+  --line: #dde3e1;
+  --accent: #0f6b5f;
+  --accent-soft: #e0efec;
+  --warn: #a35a00;
+  --warn-soft: #fbefdc;
+  --crit: #b3261e;
+  --crit-soft: #fbe5e3;
+  --done: #7c8a86;
+  --src-todoist: #c2410c;
+  --src-jira: #1d4ed8;
+  --src-gitlab: #7c3aed;
+  --font-body: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111715; --panel: #18201e; --ink: #e4ebe9; --muted: #95a39f; --line: #2a3532;
+    --accent: #4fc2ae; --accent-soft: #1b3330; --warn: #f0a648; --warn-soft: #3a2a14;
+    --crit: #f2867e; --crit-soft: #3b1d1b; --done: #6f7c78;
+    --src-todoist: #fb923c; --src-jira: #7aa2ff; --src-gitlab: #b79cff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111715; --panel: #18201e; --ink: #e4ebe9; --muted: #95a39f; --line: #2a3532;
+  --accent: #4fc2ae; --accent-soft: #1b3330; --warn: #f0a648; --warn-soft: #3a2a14;
+  --crit: #f2867e; --crit-soft: #3b1d1b; --done: #6f7c78;
+  --src-todoist: #fb923c; --src-jira: #7aa2ff; --src-gitlab: #b79cff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.6; }
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 20px; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.date { font-size: 28px; font-weight: 700; letter-spacing: .01em; text-wrap: balance; }
+.date small { font-size: 15px; font-weight: 500; color: var(--muted); margin-left: 10px; }
+.asof { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); }
+
+.progress { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 10px; }
+.progress .nums { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); }
+.progress .nums b { font-family: var(--font-mono); font-size: 20px; color: var(--ink); margin-right: 4px; font-variant-numeric: tabular-nums; }
+.bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); }
+.bar span { display: block; height: 100%; }
+
+.layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+.rail { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px 10px; display: grid; gap: 4px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+@media (max-width: 860px) { .rail { position: static; } }
+.rail h2, .col h2, .side h2 { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--muted); margin: 0 0 6px; }
+.ev { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.ev:first-of-type { border-top: 0; }
+.ev .t { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ev.past { color: var(--done); }
+.ev.past a { text-decoration: line-through; text-decoration-color: var(--line); }
+.ev.current { color: var(--accent); font-weight: 700; }
+.nowline { display: grid; grid-template-columns: 46px 1fr; gap: 8px; align-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--accent); padding: 2px 0; }
+.nowline i { height: 2px; background: var(--accent); border-radius: 1px; }
+
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; align-items: start; }
+.col { background: color-mix(in srgb, var(--panel) 55%, var(--bg)); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+.col h2 { display: flex; justify-content: space-between; align-items: baseline; }
+.col h2 .n { font-family: var(--font-mono); font-size: 12px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; }
+.col .hint { font-size: 12px; color: var(--muted); margin: -4px 0 2px; }
+.empty { font-size: 13px; color: var(--muted); padding: 8px 2px; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; min-width: 0; }
+.card .title { font-weight: 500; overflow-wrap: anywhere; }
+.card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.card .why { font-size: 12px; color: var(--muted); }
+.card.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.card.crit { border-color: color-mix(in srgb, var(--crit) 50%, var(--line)); }
+.card.done .title { color: var(--done); text-decoration: line-through; text-decoration-color: var(--line); }
+.src { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.src.todoist { color: var(--src-todoist); }
+.src.jira { color: var(--src-jira); }
+.src.gitlab { color: var(--src-gitlab); }
+.time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.tag { padding: 0 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.crit { background: var(--crit-soft); color: var(--crit); }
+
+details.col summary { cursor: pointer; list-style: none; }
+details.col summary::-webkit-details-marker { display: none; }
+details.col summary h2::after { content: "＋"; margin-left: auto; padding-left: 8px; }
+details.col[open] summary h2::after { content: "−"; }
+
+.lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.side { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+.side ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12.5px; border: 1px solid var(--line); border-radius: 14px; padding: 2px 10px; }
+.chip .time { color: var(--muted); margin-right: 6px; font-size: 11.5px; }
+.chip.past { color: var(--done); }
+.missing li { color: var(--warn); }
+@media (prefers-reduced-motion: no-preference) { .card { transition: border-color .15s; } .card:hover { border-color: var(--accent); } }
+</style>
+
+<div class="wrap" id="app"></div>
+
+<script type="application/json" id="board-data">/*__DATA__*/</script>
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('board-data').textContent);
+  var app = document.getElementById('app');
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function link(text, url) { return url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(text) + '</a>' : esc(text); }
+  function mins(t) { if (!t) return null; var p = t.split(':'); return +p[0] * 60 + +p[1]; }
+  var now = mins(D.generatedAt);
+  var SRC = { todoist: 'TODOIST', jira: 'JIRA', gitlab: 'MR', calendar: 'CAL' };
+
+  function card(c, extra) {
+    var cls = 'card' + (c.level ? ' ' + c.level : '') + (extra ? ' ' + extra : '');
+    var meta = '';
+    if (c.source) meta += '<span class="src ' + esc(c.source) + '">' + (SRC[c.source] || esc(c.source)) + '</span>';
+    if (c.time) meta += '<span class="time">' + esc(c.time) + '</span>';
+    (c.tags || []).forEach(function (t) {
+      var tc = typeof t === 'string' ? { text: t } : t;
+      meta += '<span class="tag' + (tc.level ? ' ' + tc.level : '') + '">' + esc(tc.text) + '</span>';
+    });
+    return '<div class="' + cls + '"><div class="title">' + link(c.title, c.url) + '</div>' +
+      (meta ? '<div class="meta">' + meta + '</div>' : '') +
+      (c.why ? '<div class="why">' + esc(c.why) + '</div>' : '') + '</div>';
+  }
+  function column(key, title, hint, opts) {
+    var items = (D.columns && D.columns[key]) || [];
+    opts = opts || {};
+    var body = items.length ? items.map(function (c) { return card(c, opts.done ? 'done' : ''); }).join('') : '<div class="empty">' + esc(opts.empty || 'なし') + '</div>';
+    var head = '<h2><span>' + esc(title) + '</span><span class="n">' + items.length + '</span></h2>' + (hint ? '<div class="hint">' + esc(hint) + '</div>' : '');
+    if (opts.collapsed) return '<details class="col"><summary>' + head + '</summary>' + body + '</details>';
+    return '<section class="col">' + head + body + '</section>';
+  }
+
+  var C = D.columns || {};
+  var n = function (k) { return (C[k] || []).length; };
+  var total = n('now') + n('mr') + n('contact') + n('later') + n('done');
+  var seg = function (k, color) { return total ? '<span style="width:' + (n(k) / total * 100) + '%;background:' + color + '"></span>' : ''; };
+
+  var evs = D.events || [];
+  var rail = '';
+  var placed = false;
+  evs.forEach(function (e) {
+    var s = mins(e.start), en = mins(e.end);
+    if (!placed && now != null && s > now) { rail += '<div class="nowline"><span>' + esc(D.generatedAt) + '</span><i></i></div>'; placed = true; }
+    var st = now == null ? '' : (en <= now ? 'past' : (s <= now ? 'current' : ''));
+    rail += '<div class="ev ' + st + '"><span class="t">' + esc(e.start) + '</span><span>' + link(e.title, e.url) + (e.note ? '<br><small>' + esc(e.note) + '</small>' : '') + '</span></div>';
+  });
+  if (!placed && now != null) rail += '<div class="nowline"><span>' + esc(D.generatedAt) + '</span><i></i></div>';
+  if (!evs.length) rail += '<div class="empty">予定なし</div>';
+
+  var routine = (D.routine || []).map(function (r) {
+    var past = now != null && r.time && mins(r.time) < now;
+    return '<span class="chip' + (past ? ' past' : '') + '">' + (r.time ? '<span class="time">' + esc(r.time) + '</span>' : '') + esc(r.title) + '</span>';
+  }).join('');
+
+  var nuts = (D.nuts || []).map(function (x) { return '<li>' + link(x.title, x.url) + (x.detail ? '<br><small class="note">' + esc(x.detail) + '</small>' : '') + '</li>'; }).join('');
+  var links = (D.links || []).map(function (x) { return link(x.label, x.url); }).join(' ／ ');
+  var missing = (D.missing || []).map(function (x) { return '<li>' + esc(x.source) + ': ' + esc(x.fix) + '</li>'; }).join('');
+
+  app.innerHTML =
+    '<header class="top"><div><div class="date">' + esc(D.dateLabel) + '<small>今日のボード</small></div>' +
+      (D.note ? '<div class="note">' + esc(D.note) + '</div>' : '') + '</div>' +
+      '<div class="asof">' + esc(D.date) + ' ' + esc(D.generatedAt) + ' 時点</div></header>' +
+    '<section class="progress" aria-label="進み具合"><div class="nums">' +
+      '<span><b>' + n('done') + '</b>済んだ</span>' +
+      '<span><b>' + n('now') + '</b>今日中に決める・動かす</span>' +
+      '<span><b>' + n('mr') + '</b>MR の対応待ち</span>' +
+      '<span><b>' + n('contact') + '</b>連絡・確認</span>' +
+      '<span><b>' + n('later') + '</b>明日以降に回せそう</span></div>' +
+      '<div class="bar">' + seg('done', 'var(--accent)') + seg('now', 'var(--crit)') + seg('mr', 'var(--src-gitlab)') + seg('contact', 'var(--warn)') + seg('later', 'var(--done)') + '</div></section>' +
+    '<div class="layout"><aside class="rail" aria-label="予定"><h2>予定</h2>' + rail + '</aside>' +
+      '<div class="board">' +
+        column('now', '今日中に決める・動かす', '緊急度高・重要度高、期日が今日の Jira', { empty: '残りなし' }) +
+        column('mr', 'MR の対応待ち', 'GitLab で自分のラベルが付いているもの', { empty: '対応待ちの MR なし' }) +
+        column('contact', '連絡・確認', '頭を使わずに片付くもの', { empty: '残りなし' }) +
+        column('done', '済んだ', '今日 Todoist で完了にしたもの', { done: true, empty: 'まだなし' }) +
+        column('later', '明日以降に回せそう', '緊急度・重要度とも低い。期日を動かす候補', { collapsed: true }) +
+      '</div></div>' +
+    '<div class="lower">' +
+      (routine ? '<section class="side"><h2>毎日のもの</h2><div class="chips">' + routine + '</div></section>' : '') +
+      (nuts ? '<section class="side"><h2>Nuts の計画で今週に掛かるもの</h2><ul>' + nuts + '</ul></section>' : '') +
+      (missing ? '<section class="side missing"><h2>取れなかったもの</h2><ul>' + missing + '</ul></section>' : '') +
+    '</div>' +
+    (links ? '<div class="note">' + links + '</div>' : '');
+})();
+</script>
