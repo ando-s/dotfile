@@ -12,6 +12,7 @@
 
 - 個人のリポジトリ（dotfile など）は、ブランチ・worktree・MR を作らず main に直接コミットする。push はユーザーが頼んだときだけ。チームのリポジトリは下の手順に従う。
 - 仕事で使うスキルはdotfileでなく、web-applicationの`packs/nuts/.ai/skills/`に置いてMRでチームに共有する。人ごとに違う値（MCPの登録名など）に依存させない。
+- 自分だけが使うスキル（自分のPCのファイルや自分の予定・会議を前提にするもの）は`~/dev/dotfile/claude/skills/`に置き、`~/.claude/skills/`からリンクを張る。`~/.claude/skills/`に実体を作らない。直すときもリンク先のdotfileを直してコミットする。
 - 仕事のリポジトリでは、コミット前に`git config user.email`が`s-ando@wwwave.jp`か確かめ、違えばそのリポジトリのローカル設定に入れる。グローバルの設定は個人のアカウントになっている。push済みのコミットのauthorは直さない。
 - force-pushはClaudeが実行しない。履歴の置き換えが要るときは内容を用意し、`git push --force-with-lease`のコマンドをユーザーに渡す。
 - **MRに `Request Code Review(Nuts)` などレビュー依頼ラベルを勝手に 付けない。** MR作成は「ブランチ・コミット・push・MR作成（タイトル/説明）」までに留める。レビュー依頼ラベルの付与はレビューを回す合図であり、ユーザーが手動で行う（明示依頼があった場合のみ付ける）。
