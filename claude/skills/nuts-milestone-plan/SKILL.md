@@ -21,7 +21,7 @@ description: Nuts 移行のマイルストーン計画（NTMS）を見直し、�
 
 | もの | 場所 |
 | --- | --- |
-| HTML の正本 | `~/Documents/nuts/スケジュールの計画/Nuts移行_マイルストーン計画.html` |
+| HTML の正本 | ガントの repo の `plan/Nuts移行_マイルストーン計画.html`（repo の場所は下の「環境ごとの値」） |
 | Artifact（表示用） | https://claude.ai/artifact/LYhTzR1KmusBCA4AFzQram |
 | Drive（共有ドライブ「スケジュールの計画」） | folderId `1AATSM5Qp43O4RimEHg9zxrDAzDuwoXFn`、HTML の fileId `1ztkBn8xCwtmb5zq8Xi0mJgKOQTpGLauj`、README の documentId `1W9nPrIs8MoTeiqam5N8ufQ5-dwWg2be-wMjlgZ0Q1V4` |
 | Jira | プロジェクト NTMS（エピックが行）。開始日は `customfield_10015`、期日は `duedate` |
@@ -29,6 +29,19 @@ description: Nuts 移行のマイルストーン計画（NTMS）を見直し、�
 | 計画文書（順序の制約の根拠） | web-application `packs/nuts/docs/プロジェクトマネジメント計画/CFのNuts移行の最終形と段階.md`。変更は comicdev のペインの claude に依頼する |
 | 見積もりの考え方 | PdE「作業見積もりの考え方」。Nuts の資料の場所は Google ドキュメント `1SlBUlgGvi_NL3TIF7XXkcXRUeY27Saecsj_Buuef2uU` |
 | 決済手段のテスト用アカウント | Drive のスプレッドシート「Pass管理表_Festa_決済関連」`1BmrQEbXmJJfZsbinrjMea6wHoddlDVpxA7Ve88pyKBQ`（atone・PayPay・SBPS・docomo・GMO・SonyPayment の開発/STG 用）。値は返答に書かない |
+
+## 環境ごとの値
+
+ローカルと comicdev のどちらでも動かす。パスはこの表で読み替え、スキルの中に絶対パスを書かない。
+
+| 値 | ローカル（Mac） | comicdev |
+| --- | --- | --- |
+| ガントの repo（`REPO`） | `~/dev/2026-07-31_nuts_gantt_chart` | `/home/ec2-user/2026-07-31_nuts_gantt_chart` |
+| playwright を持つ `node_modules`（`NODE_PATH`） | `/Users/s-ando/gyomu/zenn_集計/node_modules` | `/home/ec2-user/explainer-docs/node_modules` |
+| ブラウザ | Chrome（`channel: 'chrome'`） | playwright の chromium（`~/.cache/ms-playwright`。Chrome は無い） |
+| 一時ファイル | `$CLAUDE_JOB_DIR/tmp`（無ければ `/tmp`） | 同じ |
+
+正本は `$REPO/plan/Nuts移行_マイルストーン計画.html`。ローカルの `~/Documents/nuts/スケジュールの計画/` には同じ名前のリンクがある。直したら repo にコミットして push し、もう一方の環境では pull してから使う。
 
 ## HTML の構造
 

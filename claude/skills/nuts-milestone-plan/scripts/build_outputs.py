@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""正本の HTML から、Artifact 用（外側の html/head/body を外したもの）を作り、Downloads にコピーを置く。
+"""正本の HTML から、Artifact 用（外側の html/head/body を外したもの）を作る。
 
 使い方: python3 -I build_outputs.py <正本.html> <Artifact用の出力先.html>
 """
-import shutil
 import sys
 from pathlib import Path
 
@@ -21,6 +20,4 @@ body = body.replace(
 )
 dst.write_text(body, encoding="utf-8")
 
-downloads = Path.home() / "Downloads" / src.name
-shutil.copy(src, downloads)
-print(f"artifact: {dst}\ndownloads: {downloads}\ntemplates: {s.count('<template data-plan=')}")
+print(f"artifact: {dst}\ntemplates: {s.count('<template data-plan=')}")

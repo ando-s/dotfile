@@ -4,17 +4,17 @@
 
 ## HTML の検査と配布
 
-正本: `~/Documents/nuts/スケジュールの計画/Nuts移行_マイルストーン計画.html`
+正本: `$REPO/plan/Nuts移行_マイルストーン計画.html`（`REPO` と `NODE_PATH` は SKILL.md の「環境ごとの値」）
 
 1. 描画の確認（ブラウザは file:// を開けないので playwright を使う。別プロジェクトの node_modules を借りる）
 
 ```bash
-NODE_PATH=/Users/s-ando/gyomu/zenn_集計/node_modules node scripts/check_render.js "<正本のパス>"
+NODE_PATH=<環境の node_modules> node scripts/check_render.js "$REPO/plan/Nuts移行_マイルストーン計画.html"
 ```
 
 `bars`・`keyedBars`・`matrixHits`・`items` の件数、帯・図・項目一覧を押したときのパネルの題名、根拠タブで見える見出し、`phone overflow: false`、`errors: []` を見る。
 
-2. Artifact 用ファイルと Downloads 用コピーを作る
+2. Artifact 用ファイルを作る
 
 ```bash
 python3 -I scripts/build_outputs.py "<正本のパス>" "<一時ディレクトリ>/milestone-plan.html"
@@ -26,7 +26,7 @@ Artifact 用は外側の `<!doctype>/<html>/<head>/<body>` を外し、`<title>`
 
 コネクタは既存ファイルの中身を差し替えられないので、同じ名前で作り直す（2026-11-02 からこの方式）。
 
-正本が大きいとき（目安 100KB 超。時点が 3 つ以上）は、`create_file` に全文を載せられない（出力の上限）。そのときは作り直さず、`build_outputs.py` が置く `~/Downloads/Nuts移行_マイルストーン計画.html` を、ユーザーがドライブのフォルダの同名ファイルにドラッグして置き換える（ID は変わらない）。返答でそのことを伝える。
+正本が大きいとき（目安 100KB 超。時点が 3 つ以上）は、`create_file` に全文を載せられない（出力の上限）。そのときは作り直さず、正本（repo の `plan/` のファイル。comicdev で直したときはローカルで pull する）を、ユーザーがドライブのフォルダの同名ファイルにドラッグして置き換える（ID は変わらない）。返答でそのことを伝える。
 
 1. 正本を `Read`（`allow_large`）で読み、Google ドライブのコネクタ `create_file` に `title: "Nuts移行_マイルストーン計画.html"`、`parentId: 1AATSM5Qp43O4RimEHg9zxrDAzDuwoXFn`、`contentMimeType: text/html`、`disableConversionToGoogleType: true`、`textContent: <正本の全文>` で作る。返ってきた `fileSize` が正本の `wc -c` と同じことを確かめる
 2. 古いファイルを `trash_file` でゴミ箱へ移す
