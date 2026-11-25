@@ -13,9 +13,11 @@
 
   Enter   移る（使ってないなら開き直す）
   Ctrl-T  優先度を なし→高→中→低→なし の順に変える。自分で付けていないものは「なし」
-  Ctrl-S  使ってないにする・開き直す。使ってないにするときは、先にそのセッションへ「ここまでの結論と
-          残りの作業を記録先に書いて」と頼み、書き終わってから閉じる。書いている間は「保存中」と出る
-  Ctrl-G  グループを付ける・外す。番号で今あるグループを選ぶか、新しい名前を打つ
+  Ctrl-S  使ってないにする・開き直す。使ってないにするときは、ブランチ・未コミットの変更・最後の依頼・
+          開き直すコマンドを決まった形で残してから閉じる。会話の中で書いた claude_tasks のファイルがあれば
+          その末尾にも足す。要約はしない（会話は claude --resume でそのまま戻る）
+  Ctrl-G  グループを付ける・外す。番号で今あるグループを選ぶか、新しい名前を打つ。
+          見出しの上なら、空のグループを新しく作り、そのグループのすぐ下に置く
   Alt-↑↓  グループの順番を1つ上・下へ動かす。見出しの上でも、そのグループのセッションの上でもよい
 グループはセッションが0件になっても残り、見出しに（0）と出る。消すのはグループの見出しの上の Ctrl-D だけ。
 中のセッションは閉じず、グループなしになる
@@ -397,7 +399,6 @@ def header():
             ("応答あり", "未確認の応答"),
             ("待機中", "次の依頼待ち"),
             ("作業中", "応答中"),
-            ("保存中", "閉じる前に記録中"),
             ("閉じた", "使ってない"),
         ]
     )
@@ -483,9 +484,28 @@ def delete_group(name):
     save_group_order([g for g in ordered_groups() if g != name])
 
 
-def set_group(kind, session):
-    """今あるグループを番号で選ぶか、新しい名前を打つ。- で外す。"""
-    if kind == "heading" or not session:
+def create_group(after):
+    """空のグループを作り、after のグループのすぐ後ろに置く。after が無ければ最後に置く。"""
+    try:
+        name = input("新しいグループの名前（空なら作らない）> ").strip()
+    except EOFError:
+        return
+    if not name:
+        return
+    order = ordered_groups()
+    if name in order:
+        input(f"「{name}」はもうあります。Enter で一覧に戻ります")
+        return
+    position = order.index(after) + 1 if after in order else len(order)
+    save_group_order(order[:position] + [name] + order[position:])
+
+
+def set_group(kind, group_field, session):
+    """今あるグループを番号で選ぶか、新しい名前を打つ。- で外す。見出しの上では新しいグループを作る。"""
+    if kind == "heading":
+        create_group(group_field)
+        return
+    if not session:
         return
     groups = ordered_groups()
     current = group_name(session)
@@ -537,7 +557,7 @@ def main():
         print(move_group(*args[1:5]))
         return
     if args[:1] == ["--group"]:
-        set_group(*args[1:3])
+        set_group(*args[1:4])
         return
     if args[:1] == ["--list"]:
         for entry in rows():
@@ -555,7 +575,7 @@ def main():
             f"--bind=start:reload({me} --list)",
             f"--bind=ctrl-t:execute-silent([ {{1}} = heading ] || {FOCUS} priority-session {{5}})+{refresh}",
             f"--bind=ctrl-s:execute-silent([ {{1}} = heading ] || {{ [ {{1}} = shelf ] && {FOCUS} unshelve {{5}} || {FOCUS} save-and-shelve {{5}}; }})+{refresh}",
-            f"--bind=ctrl-g:execute({me} --group {{1}} {{5}})+{refresh}",
+            f"--bind=ctrl-g:execute({me} --group {{1}} {{4}} {{5}})+{refresh}",
             f"--bind=alt-up:transform({me} --move-group up {{1}} {{4}} {{5}})",
             f"--bind=alt-down:transform({me} --move-group down {{1}} {{4}} {{5}})",
             f"--bind=ctrl-r:execute({me} --rename {{1}} {{4}} {{5}})+{refresh}",

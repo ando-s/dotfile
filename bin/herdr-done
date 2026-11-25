@@ -7,8 +7,12 @@
   4. worktree がマージ済みで未コミットの変更が無ければ、消すかを聞く。そうでなければ理由を出して残す
      ブランチは消さない
 
-  herdr-done [<workspace_id>]   既定は今のワークスペース
-  herdr-done --gc               一覧の古い記録だけを消す（今のペインに無く、7日以上更新の無いもの）
+  herdr-done [<workspace_id>]          既定は今のワークスペース
+  herdr-done --yes <workspace_id>      聞かずに閉じ、マージ済みで変更の無い worktree も聞かずに消す
+  herdr-done --yes --shelved <session> 使ってないのセッションを一覧から外し、worktree を同じ条件で消す
+  herdr-done --gc                      一覧の古い記録だけを消す（今のペインに無く、7日以上更新の無いもの）
+
+どの場合も、ほかの開いているペインや、ほかの使ってないのセッションが使っている worktree は消さない。
 """
 import glob
 import json
@@ -34,7 +38,13 @@ def git(cwd, *args):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+ASSUME_YES = False
+SHELF_DIR = os.path.join(REGISTRY_DIR, "shelf")
+
+
 def ask(question, default=False):
+    if ASSUME_YES:
+        return True
     suffix = " [Y/n] " if default else " [y/N] "
     try:
         answer = input(question + suffix).strip().lower()
@@ -93,11 +103,84 @@ def merged(worktree, branch):
         return False
 
 
+def inside(directory, root):
+    directory, root = os.path.realpath(directory), os.path.realpath(root)
+    return directory == root or directory.startswith(root + os.sep)
+
+
+def used_elsewhere(worktree, closing_panes=(), closing_session=None):
+    """閉じるもの以外の、開いているペインか使ってないのセッションが worktree の中にいるか。"""
+    for p in herdr("pane", "list").get("panes", []):
+        if p["pane_id"] in closing_panes:
+            continue
+        if any(d and inside(d, worktree) for d in (p.get("foreground_cwd"), p.get("cwd"))):
+            return True
+    for path in glob.glob(os.path.join(SHELF_DIR, "*.json")):
+        if os.path.basename(path)[:-5] == closing_session:
+            continue
+        with open(path) as f:
+            cwd = json.load(f).get("cwd")
+        if cwd and inside(cwd, worktree):
+            return True
+    return False
+
+
+def forget(session_id):
+    for path in (os.path.join(REGISTRY_DIR, f"{session_id}.json"),
+                 os.path.join(REGISTRY_DIR, "main", session_id),
+                 os.path.join(REGISTRY_DIR, "priority", session_id),
+                 os.path.join(REGISTRY_DIR, "group", session_id),
+                 os.path.join(SHELF_DIR, f"{session_id}.json")):
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def clean_worktrees(worktrees, closing_panes=(), closing_session=None):
+    for worktree in worktrees:
+        if used_elsewhere(worktree, closing_panes, closing_session):
+            print(f"残します（ほかのセッションが使っている）: {worktree}")
+            continue
+        branch = git(worktree, "symbolic-ref", "--short", "-q", "HEAD")
+        changes = git(worktree, "status", "--porcelain") or ""
+        if changes:
+            print(f"残します（未コミットの変更 {len(changes.splitlines())} 件）: {worktree}")
+            continue
+        if not merged(worktree, branch):
+            print(f"残します（マージされていない）: {worktree}  {branch or '(detached)'}")
+            continue
+        if ask(f"マージ済みです。worktree を消しますか？ {worktree}", default=True):
+            main_repo = os.path.dirname(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+            result = subprocess.run(["git", "-C", main_repo, "worktree", "remove", worktree],
+                                    capture_output=True, text=True)
+            print(f"消しました: {worktree}" if result.returncode == 0 else f"消せませんでした: {result.stderr.strip()}")
+
+
+def close_shelved(session_id):
+    """使ってないのセッションを一覧から外し、その worktree を片付ける。"""
+    path = os.path.join(SHELF_DIR, f"{session_id}.json")
+    if not os.path.exists(path):
+        sys.exit(f"使ってないの一覧に {session_id} がありません")
+    with open(path) as f:
+        entry = json.load(f)
+    print(f"使ってない: {entry.get('label') or session_id}")
+    worktree = linked_worktree(entry.get("cwd"))
+    forget(session_id)
+    clean_worktrees([worktree] if worktree else [], closing_session=session_id)
+
+
 def main():
-    if sys.argv[1:] == ["--gc"]:
+    global ASSUME_YES
+    args = sys.argv[1:]
+    if args[:1] == ["--yes"]:
+        ASSUME_YES, args = True, args[1:]
+    if args == ["--gc"]:
         removed = gc()
         print(f"一覧から {len(removed)} 件を消しました" + "".join(f"\n  {s}" for s in removed))
         return
+    if args[:1] == ["--shelved"]:
+        close_shelved(args[1])
+        return
+    sys.argv[1:] = args
 
     workspace_id = (sys.argv[1] if len(sys.argv) > 1
                     else os.environ.get("HERDR_ACTIVE_WORKSPACE_ID")
@@ -127,30 +210,12 @@ def main():
         return
 
     for session_id in sessions:
-        for path in (os.path.join(REGISTRY_DIR, f"{session_id}.json"),
-                     os.path.join(REGISTRY_DIR, "main", session_id),
-                     os.path.join(REGISTRY_DIR, "priority", session_id),
-                     os.path.join(REGISTRY_DIR, "group", session_id),
-                     os.path.join(REGISTRY_DIR, "shelf", f"{session_id}.json")):
-            if os.path.exists(path):
-                os.remove(path)
+        forget(session_id)
+    closing = [p["pane_id"] for p in panes]
     herdr("workspace", "close", workspace_id)
     print(f"閉じました。一覧から {len(sessions)} 件のセッションを外しました")
 
-    for worktree in worktrees:
-        branch = git(worktree, "symbolic-ref", "--short", "-q", "HEAD")
-        changes = git(worktree, "status", "--porcelain") or ""
-        if changes:
-            print(f"残します（未コミットの変更 {len(changes.splitlines())} 件）: {worktree}")
-            continue
-        if not merged(worktree, branch):
-            print(f"残します（マージされていない）: {worktree}  {branch or '(detached)'}")
-            continue
-        if ask(f"マージ済みです。worktree を消しますか？ {worktree}", default=True):
-            main_repo = os.path.dirname(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-            result = subprocess.run(["git", "-C", main_repo, "worktree", "remove", worktree],
-                                    capture_output=True, text=True)
-            print("消しました" if result.returncode == 0 else f"消せませんでした: {result.stderr.strip()}")
+    clean_worktrees(worktrees, closing_panes=closing)
 
     removed = gc()
     if removed:

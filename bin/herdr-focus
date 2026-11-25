@@ -14,8 +14,8 @@
                                           優先度を変える。省くと なし→高→中→低→なし の順に回す
   herdr-focus shelve-session <session_id> 1つのセッションを棚に上げる
   herdr-focus save-and-shelve <session_id>
-                                          セッションに、ここまでの結論と残りの作業を書かせてから棚に上げる。
-                                          裏で動き、書き終わるのを待つ。許可や入力を求めて止まったら棚に上げない
+                                          決まった形の記録（ブランチ・未コミットの変更・最後の依頼・開き直すコマンド）を
+                                          残してから棚に上げる。会話の中で書いた claude_tasks のファイルがあれば末尾に足す
   herdr-focus unshelve <session_id>       棚から開き直す
   herdr-focus sync                        メインの ★ をサイドバーに出し直す（herdr の再起動後など）
 既定のワークスペースは今のもの。
@@ -23,6 +23,7 @@
 import glob
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -38,14 +39,11 @@ SHELF_DIR = os.path.join(BASE, "shelf")
 LABEL_DIR = os.path.join(BASE, "labels")
 PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 SOURCE = "herdr-focus"
-PENDING_DIR = os.path.join(BASE, "shelf-pending")
-SAVE_PROMPT = (
-    "このセッションをいったん閉じる。あとで新しいセッションから続きを始められるよう、"
-    "ここまでの結論・決まったこと・残りの作業を、この作業の記録先に書いて。"
-    "記録先は、実装でなければ claude_tasks のタスクファイル、実装なら計画ファイルかチケット。"
-    "書き終えたら、書いた場所のパスかチケットのキーだけを最後に1行で出して。"
-)
-SAVE_TIMEOUT_MS = 15 * 60 * 1000
+TASKS_DIR = os.path.expanduser("~/claude_tasks")
+WRITE_TOOLS = ("Write", "Edit", "MultiEdit")
+# Bash で追記・書き換えした claude_tasks のファイル（>> や sed -i の書き先）
+BASH_WRITE = re.compile(r"(?:>>?|sed -i[^|;&]*?|tee(?: -a)?)\s*['\"]?(" + re.escape(TASKS_DIR) + r"/[\w.-]+\.md)")
+SKIP_PREFIXES = ("<", "[Request interrupted", "This session is being continued")
 MAIN_MARK = "★"
 
 
@@ -166,7 +164,7 @@ def session_label(session_id, workspace):
     return state.get("label") or workspace.get("label", ""), ref
 
 
-def shelve(session_ids, force=False):
+def shelve(session_ids, force=False, extra=None):
     all_panes = panes()
     targets = [p for p in all_panes if session_of(p) in session_ids]
     working = [p["pane_id"] for p in targets if p.get("agent_status") == "working"]
@@ -183,6 +181,7 @@ def shelve(session_ids, force=False):
             "ref": ref,
             "cwd": transcript_cwd(session_id) or pane.get("foreground_cwd") or pane.get("cwd"),
             "shelved_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            **(extra or {}),
         }
         with open(os.path.join(SHELF_DIR, f"{session_id}.json"), "w") as f:
             json.dump(entry, f, ensure_ascii=False)
@@ -212,35 +211,89 @@ def unshelve(session_id):
     print(f"棚から開き直しました: {entry.get('label')}")
 
 
+def transcript_path(session_id):
+    paths = glob.glob(os.path.join(PROJECTS_DIR, "*", f"{session_id}.jsonl"))
+    return max(paths, key=os.path.getmtime) if paths else None
+
+
+def read_transcript(session_id):
+    """(最後に書いた claude_tasks のファイル, 最後の依頼) を会話記録から読む。"""
+    path = transcript_path(session_id)
+    task_file, last = None, ""
+    if not path:
+        return task_file, last
+    with open(path) as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            content = (entry.get("message") or {}).get("content")
+            if entry.get("type") == "assistant" and isinstance(content, list):
+                for block in content:
+                    target = (block.get("input") or {}).get("file_path", "") if isinstance(block, dict) else ""
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        continue
+                    if block.get("name") in WRITE_TOOLS and os.path.dirname(target) == TASKS_DIR \
+                            and target.endswith(".md"):
+                        task_file = target
+                    elif block.get("name") == "Bash":
+                        found = [f for f in BASH_WRITE.findall((block.get("input") or {}).get("command", ""))
+                                 if os.path.exists(f)]
+                        if found:
+                            task_file = found[-1]
+            elif entry.get("type") == "user" and not entry.get("isMeta") and not entry.get("isSidechain"):
+                if isinstance(content, list):
+                    content = " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+                text = " ".join(content.split()) if isinstance(content, str) else ""
+                if text and not text.startswith(SKIP_PREFIXES):
+                    last = text
+    return task_file, last
+
+
+def git_state(cwd):
+    """(ブランチ, 未コミットの変更があるか)。git の外なら (None, None)。"""
+    branch = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+                            capture_output=True, text=True)
+    if branch.returncode != 0:
+        return None, None
+    status = subprocess.run(["git", "-C", cwd, "status", "--porcelain"], capture_output=True, text=True).stdout
+    return branch.stdout.strip(), bool(status.strip())
+
+
 def save_and_shelve(session_id):
-    """書かせる依頼を送り、終わるのを裏で待ってから棚に上げる。"""
+    """決まった形の記録を残してから棚に上げる。要約はしない。会話は claude --resume で戻せる。
+    記録は棚のファイルに入れ、会話の中で書いた claude_tasks のファイルがあればその末尾にも足す。
+    計画ファイルとチケットには書かない（成果物と外のサービスに会話の記録を残さないため）。"""
     pane = next((p for p in panes() if session_of(p) == session_id), None)
     if not pane:
         sys.exit("セッションが開いていません")
-    if pane.get("agent_status") in ("working", "blocked"):
-        sys.exit("作業中か要対応のため、使ってないにしません")
-    os.makedirs(PENDING_DIR, exist_ok=True)
-    open(os.path.join(PENDING_DIR, session_id), "w").close()
-    subprocess.Popen([os.path.abspath(__file__), "--save-worker", session_id, pane["pane_id"]],
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-
-
-def save_worker(session_id, pane_id):
-    pending = os.path.join(PENDING_DIR, session_id)
-    try:
-        result = subprocess.run(
-            ["herdr", "agent", "prompt", pane_id, SAVE_PROMPT, "--wait", "--until", "idle", "--until", "done",
-             "--until", "blocked", "--timeout", str(SAVE_TIMEOUT_MS)],
-            capture_output=True, text=True, timeout=SAVE_TIMEOUT_MS / 1000 + 30,
-        )
-        status = (herdr("pane", "get", pane_id).get("pane") or {}).get("agent_status")
-        # 許可や入力を求めて止まったとき・失敗したときは閉じない。利用者が画面で見て決める
-        if result.returncode == 0 and status in ("idle", "done"):
-            shelve([session_id])
-    finally:
-        if os.path.exists(pending):
-            os.remove(pending)
+    if pane.get("agent_status") == "working":
+        sys.exit("作業中のため、使ってないにしません")
+    workspace = herdr("workspace", "get", pane["workspace_id"]).get("workspace", {})
+    label, ref = session_label(session_id, workspace)
+    cwd = transcript_cwd(session_id) or pane.get("foreground_cwd") or pane.get("cwd")
+    task_file, last = read_transcript(session_id)
+    branch, dirty = git_state(cwd) if cwd and os.path.isdir(cwd) else (None, None)
+    record = {"branch": branch, "dirty": dirty, "last_prompt": last[:300], "task_file": task_file}
+    if task_file and os.path.exists(task_file):
+        lines = [
+            f"\n## 使ってないにした記録（{time.strftime('%Y-%m-%d %H:%M')}）",
+            f"- セッション: {label}（{session_id}）",
+            f"- 開き直す: herdr-pick の「使ってない」で Enter。または `cd {cwd} && claude --resume {session_id}`",
+            f"- 作業ディレクトリ: {cwd}",
+        ]
+        if branch:
+            lines.append(f"- ブランチ: {branch}（未コミットの変更: {'あり' if dirty else 'なし'}）")
+        if ref:
+            lines.append(f"- チケット・MR: {ref}")
+        if last:
+            lines.append(f"- 最後の依頼: {last[:300]}")
+        with open(task_file, "a") as f:
+            f.write("\n".join(lines) + "\n")
+    shelve([session_id], extra=record)
+    if task_file:
+        print(task_file)
 
 
 def sessions_in(workspace_id):
@@ -269,8 +322,6 @@ def main():
         shelve([arg], force)
     elif command == "save-and-shelve" and arg:
         save_and_shelve(arg)
-    elif command == "--save-worker" and len(rest) == 2:
-        save_worker(*rest)
     elif command == "unshelve" and arg:
         unshelve(arg)
     elif command == "sync":
