@@ -20,6 +20,7 @@
   --src-todoist: #c2410c;
   --src-jira: #1d4ed8;
   --src-gitlab: #7c3aed;
+  --src-obsidian: #0e7490;
   --font-body: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
@@ -28,7 +29,7 @@
     --bg: #111715; --panel: #18201e; --ink: #e4ebe9; --muted: #95a39f; --line: #2a3532;
     --accent: #4fc2ae; --accent-soft: #1b3330; --warn: #f0a648; --warn-soft: #3a2a14;
     --crit: #f2867e; --crit-soft: #3b1d1b; --done: #6f7c78;
-    --src-todoist: #fb923c; --src-jira: #7aa2ff; --src-gitlab: #b79cff;
+    --src-todoist: #fb923c; --src-jira: #7aa2ff; --src-gitlab: #b79cff; --src-obsidian: #67d4e8;
     color-scheme: dark;
   }
 }
@@ -36,7 +37,7 @@
   --bg: #111715; --panel: #18201e; --ink: #e4ebe9; --muted: #95a39f; --line: #2a3532;
   --accent: #4fc2ae; --accent-soft: #1b3330; --warn: #f0a648; --warn-soft: #3a2a14;
   --crit: #f2867e; --crit-soft: #3b1d1b; --done: #6f7c78;
-  --src-todoist: #fb923c; --src-jira: #7aa2ff; --src-gitlab: #b79cff;
+  --src-todoist: #fb923c; --src-jira: #7aa2ff; --src-gitlab: #b79cff; --src-obsidian: #67d4e8;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -91,6 +92,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-cont
 .src.todoist { color: var(--src-todoist); }
 .src.jira { color: var(--src-jira); }
 .src.gitlab { color: var(--src-gitlab); }
+.src.obsidian { color: var(--src-obsidian); }
 .time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .tag { padding: 0 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }
@@ -123,7 +125,7 @@ details.col[open] summary h2::after { content: "−"; }
   function link(text, url) { return url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(text) + '</a>' : esc(text); }
   function mins(t) { if (!t) return null; var p = t.split(':'); return +p[0] * 60 + +p[1]; }
   var now = mins(D.generatedAt);
-  var SRC = { todoist: 'TODOIST', jira: 'JIRA', gitlab: 'MR', calendar: 'CAL' };
+  var SRC = { todoist: 'TODOIST', jira: 'JIRA', gitlab: 'MR', obsidian: 'OBSIDIAN', calendar: 'CAL' };
 
   function card(c, extra) {
     var cls = 'card' + (c.level ? ' ' + c.level : '') + (extra ? ' ' + extra : '');

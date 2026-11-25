@@ -1,11 +1,11 @@
 ---
 name: today-plan
-description: 今日やるべきことを Todoist・Google カレンダー・Jira・GitLab の対応待ちの MR・Nuts のマイルストーン計画から集め、今日のボード（Artifact）に出す。済んだものも並べるので、日中に呼べば進み具合の整理にもなる。「今日やるべきこと」「今日の予定まとめて」「今日のタスク」「今日の進捗」「今の状況を整理して」「/today-plan」と言われたときに使う。質問せず最後まで進める。
+description: 今日やるべきことを Todoist・Google カレンダー・Jira・GitLab の対応待ちの MR・Nuts のマイルストーン計画・Obsidian の今日の daily と home の未チェックのタスクから集め、今日のボード（Artifact）に出す。済んだものも並べるので、日中に呼べば進み具合の整理にもなる。「今日やるべきこと」「今日の予定まとめて」「今日のタスク」「今日の進捗」「今の状況を整理して」「/today-plan」と言われたときに使う。質問せず最後まで進める。
 ---
 
 # 今日やるべきこと
 
-Todoist・カレンダー・Jira・GitLab・Nuts の計画を読み、今日の予定・優先順位・済んだものを、毎回同じ URL の Artifact「今日のボード」に出す。読むだけで、Todoist・カレンダー・Jira・GitLab は変更しない。
+Todoist・カレンダー・Jira・GitLab・Nuts の計画・Obsidian のノートを読み、今日の予定・優先順位・済んだものを、毎回同じ URL の Artifact「今日のボード」に出す。読むだけで、Todoist・カレンダー・Jira・GitLab・Obsidian は変更しない。
 
 ## 集めるもの
 
@@ -17,6 +17,7 @@ Todoist・カレンダー・Jira・GitLab・Nuts の計画を読み、今日の�
 | GitLab の対応待ち MR | `~/.claude/skills/today-plan/scripts/gitlab_required.sh`（`Required(s-ando)` のラベルが付いた開いた MR を comic-festa-group 全体から、更新の古い順に）。出力は種類（`review` = 他の人の MR、`own` = 自分の MR）・参照・著者・題名・URL。Todoist に入れていないので、ここが唯一の元 | 出力の URL |
 | Todoist の今日済んだもの | `mcp__todoist__user-info` で自分の ID と今の時刻を取り、`mcp__todoist__find-activity`（`objectType: "task"`, `eventType: "completed"`, `initiatorId`, `dateFrom`/`dateTo` を今日の 00:00〜翌日 00:00 の `+09:00`）。work のプロジェクトの分だけ使う | `https://app.todoist.com/app/task/<objectId>` |
 | Nuts の計画で今週に掛かるもの | `~/Documents/nuts/スケジュールの計画/Nuts移行_マイルストーン計画.html` の最新 template の JSON（`class="plan-data"`）を読み、`people[].bars` のうち今日を含む週に開始・終了する帯と、`methods[].switch` が今週の手段。4 の「判断・確認をお願いしたいこと」の箇条書きも拾う | 計画: `https://claude.ai/artifact/LYhTzR1KmusBCA4AFzQram`、ガント: `https://docs.google.com/spreadsheets/d/1PvTSmnE_not_5XseWG6pYBYZBOUXJ6ZHjfEyf2PVy5M` |
+| Obsidian の未チェックのタスク | `~/.claude/skills/today-plan/scripts/obsidian_todo.py <今日の日付>`（vault `armond` の `03_view/daily/<日付>.md` と `03_view/home.md` から、`- [ ]`・`* [ ]` の行だけ）。出力はノート（`daily`・`home`）・行番号・親の題名・題名・URL。チェック済みの行、チェックの無い箇条書き、メモは拾わない | 出力の URL（`obsidian://open?vault=armond&file=…`） |
 
 今日の日付は `date +%Y-%m-%d` で取る。土日・祝日でも、呼ばれたら同じ手順でまとめる。冒頭に「今日は休み」と書き添える（祝日は `~/.claude/skills/nuts-milestone-plan/scripts/check_holidays.py` の JP_HOLIDAYS を参照）。
 
@@ -40,6 +41,15 @@ Todoist・カレンダー・Jira・GitLab・Nuts の計画を読み、今日の�
 - 予定（`events`）は自分が辞退した会議を除き、時刻順。出欠が未回答のものは `note` に書く
 - Nuts の計画で今週に掛かるもの（`nuts`）は、帯の始まり・終わり、切り替え、人の離任・参加。「判断・確認をお願いしたいこと」から、今日の会議で進められそうなものを 1〜2 件足す
 - `note` には休み・祝日の後などの前提を 1 文で書く。土日・祝日なら「今日は休み」
+
+Obsidian のタスクは、緊急度などのラベルが無いので中身で列を決める。`source: "obsidian"` にする。
+
+- 人との日程の調整・依頼・連絡は `contact`、考えて決めるもの・作るものは `now`、`home` の日付の無いものは `later`。`home` でも題名に今週の日付があれば、その日付で `now` か `contact` に入れる
+- 親の題名がある行（入れ子のタスク）は親の 1 枚にまとめ、子の題名は `why` に「子: レビューは2人以上」のように書く
+- Todoist に同じ内容のタスクがあれば Todoist の方だけを載せる
+- `daily` には「今日は休日です」のような雛形の文が残っていることがある。休みかどうかはノートで決めず、日付と祝日の表で決める
+- 今日の daily が無い（スクリプトが「daily が無い」と出す）ときは、`missing` に載せず `home` だけを使う
+- armond は同期される私用の vault なので、ノートには書き込まない
 
 ## 出し方
 
@@ -69,7 +79,7 @@ JSON の形（`board/template.html` が読む）:
 }
 ```
 
-- `source` は `todoist`・`jira`・`gitlab` のどれか。`level`・タグの `level` は `warn` か `crit`
+- `source` は `todoist`・`jira`・`gitlab`・`obsidian` のどれか。`level`・タグの `level` は `warn` か `crit`
 - `generatedAt` は今の時刻。ボードはこの時刻で、終わった予定と毎日のものを薄く出し、今の位置に線を引く
 
 ## 書き方
