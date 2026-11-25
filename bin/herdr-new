@@ -4,6 +4,8 @@
   herdr-new NATSCREAF-249 [補足]   チケットに取り組む。依頼は「チケット <キー> に取り組みたい」
   herdr-new !17894 [補足]          MR をレビューする。依頼は「MR !<番号> をレビューして」
   herdr-new <自由文>               その文を依頼にする
+  herdr-new <ディレクトリ> <依頼>   そのディレクトリをワークスペースの cwd にする（web-application 以外の repo。
+                                   例: herdr-new ~/2026-07-31_nuts_gantt_chart マイルストーン計画を見直したい）
   herdr-new                        依頼を聞く（popup から呼ぶとき）
 
 worktree は作らない。ブランチ名・レビュー用の worktree の作り方はセッションの決まり
@@ -127,6 +129,12 @@ def main():
         if not words:
             return
 
+    # 先頭が既存のディレクトリなら、そこをワークスペースの cwd にする（web-application 以外の repo）
+    cwd = REPO
+    if words and words[0][:1] in ("~", "/", ".") and os.path.isdir(os.path.expanduser(words[0])):
+        cwd = os.path.abspath(os.path.expanduser(words[0]))
+        words = words[1:] or [os.path.basename(cwd)]
+
     label, name, prompt = plan(words)
     priority, group = ("", "")
     if sys.stdin.isatty():
@@ -141,13 +149,13 @@ def main():
     line = shlex.join(command)
 
     if dry_run:
-        print(f"ワークスペース名（仮）: {label}\n優先度: {priority or 'なし'}  グループ: {group or 'なし'}\n起動: {line}")
+        print(f"ワークスペース名（仮）: {label}\ncwd: {cwd}\n優先度: {priority or 'なし'}  グループ: {group or 'なし'}\n起動: {line}")
         return
 
     save("priority", session_id, priority)
     save("group", session_id, group)
 
-    created = herdr("workspace", "create", "--cwd", REPO, "--label", label, "--focus")
+    created = herdr("workspace", "create", "--cwd", cwd, "--label", label, "--focus")
     herdr("pane", "run", created["root_pane"]["pane_id"], line)
     print(f"{created['workspace']['number']}:{label} で起動しました")
     if started:
