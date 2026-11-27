@@ -130,9 +130,18 @@ def forget(session_id):
                  os.path.join(REGISTRY_DIR, "main", session_id),
                  os.path.join(REGISTRY_DIR, "priority", session_id),
                  os.path.join(REGISTRY_DIR, "group", session_id),
+                 os.path.join(REGISTRY_DIR, "memo", session_id),
                  os.path.join(SHELF_DIR, f"{session_id}.json")):
         if os.path.exists(path):
             os.remove(path)
+
+
+def take_ownership(worktree):
+    """docker で作られた root 所有のファイルがあると git worktree remove が消せないので、自分の所有に戻す。"""
+    found = subprocess.run(["find", worktree, "!", "-user", str(os.getuid()), "-print", "-quit"],
+                           capture_output=True, text=True).stdout.strip()
+    if found:
+        subprocess.run(["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}", worktree])
 
 
 def clean_worktrees(worktrees, closing_panes=(), closing_session=None):
@@ -150,6 +159,7 @@ def clean_worktrees(worktrees, closing_panes=(), closing_session=None):
             continue
         if ask(f"マージ済みです。worktree を消しますか？ {worktree}", default=True):
             main_repo = os.path.dirname(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+            take_ownership(worktree)
             result = subprocess.run(["git", "-C", main_repo, "worktree", "remove", worktree],
                                     capture_output=True, text=True)
             print(f"消しました: {worktree}" if result.returncode == 0 else f"消せませんでした: {result.stderr.strip()}")

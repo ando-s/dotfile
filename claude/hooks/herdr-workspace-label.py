@@ -390,6 +390,9 @@ def run_label(session_id, pane_id, transcript_path, ask=False):
     fixed = current if settled else None
     token = f"{os.getpid()}-{key}"
     base = dict(key=key, token=token, purpose=state.get("purpose"), ticket=ticket, mr=mr, locked=locked, pane_id=pane_id)
+    # 課題と MR を引く間に一覧から名前を変えられていたら、変えた名前を残す
+    if read_state(session_id).get("token") != state.get("token"):
+        return None
     write_state(session_id, label=previous_label, **base)
 
     request = build_request(prompts, fixed, ticket, current, mr)
@@ -421,7 +424,8 @@ def set_purpose(session_id, purpose):
     previous_label = state.get("label")
     done = split_label(previous_label)[1] if previous_label else None
     label = f"{purpose}{SEPARATOR}{done}" if done else purpose
-    state.update(purpose=purpose, locked=True, proposal=None, pending_label=label)
+    # token を変え、裏で名前を作っている途中のフックに、前の目的で書き戻させない
+    state.update(purpose=purpose, locked=True, proposal=None, pending_label=label, token=f"set-purpose-{os.getpid()}")
     write_state(session_id, **state)
     if pane_id:
         pane_id = resolve_pane_id(session_id, pane_id)
